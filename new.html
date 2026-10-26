@@ -1,0 +1,2122 @@
+<!DOCTYPE html>
+<!--
+  poc/index.html — お客様向け予約ページ（Supabase版・本番UI）。
+  ・見た目／UX／ステップ遷移は GAS版 web/index.html の5ステップ予約ウィザードをそのまま踏襲。
+  ・データ接続だけ GAS API → Supabase に差し替え：
+      担当・メニュー       … sbGet（artists / menus / artist_menus）でアーティストごとの担当コースを組み立て
+      空き日／空き枠       … sbRpc('busy_ranges') ＋ stores の営業時間・刻み・施術時間からクライアントで算出
+      予約確定             … sbRpc('create_public_reservation')（二重予約はDB側で物理的に防止）
+      LINE通知             … Supabase Edge Function（notify-reservation）へ依頼
+  ・?ref=（流入元タグ）を予約に記録、?store= で店舗slug切替（既定 kurume）、LIFFでお客様UID/お名前を取得。
+  ・キャンセル(s-cancel)は実装済み（?mode=cancel：自分のLINE UIDの予約のみ my_reservations/cancel_my_reservation）。
+  ・同意書(s-consent)は方式A（指で署名→画像保存）で実装済み（?mode=consent：本文＋写真Y/N＋署名→submit_consent）。
+  ・※実顧客公開前に本人確認(LIFF IDトークン検証#92)を入れる前提。テスト＋対面署名運用では現状で可。
+  ・GitHub Pages 等で配信する純粋な静的HTML。外部依存は LIFF SDK のCDNのみ。
+-->
+<html lang="ja">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <!-- H5 Phase2小粒：CSP（enforcing）。GitHub Pagesは独自HTTPヘッダ不可のためmetaで設定。
+       実リソース監査（2026-06-11）に基づく許可リスト：
+       ・script-src : 外部scriptは LIFF SDK（static.line-scdn.net）のみ。インラインJSは 'unsafe-inline' で許容（撤去はPhase2本丸）
+       ・connect-src: fetchは Supabase（REST/RPC/Edge Function）のみ。LIFF SDK内部通信（api.line.me等）は
+                      公式に固定の一覧が無いため https://*.line.me https://*.line-scdn.net で安全側に許可
+       ・img-src    : アーティスト写真＝Supabase Storage 公開URL。LINEプロフィール画像CDN（profile.line-scdn.net）は
+                      現状未使用だが LIFFページのため安全側に許可
+       ・frame-ancestors / report-uri は meta では効かない → クリックジャッキングは下のJSフレームバスティングで代替 -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://static.line-scdn.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://iyuqkkpqvvmhqrswhjpi.supabase.co https://profile.line-scdn.net; connect-src 'self' https://iyuqkkpqvvmhqrswhjpi.supabase.co https://*.line.me https://*.line-scdn.net; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <!-- ★LINE でリンクを送ったときの紹介カード用の説明文（2026-09-23）。
+       これが無いと LINE は本文の文字を先頭から拾い、「読み込み中… ご予約を承りました…」のように
+       予約完了画面の文言（非表示）まで紹介カードに出ていた。LINE の読み取りは ?store= を見ないので、
+       店名は入れない（店に依存しない文にする）。公開されている画像が無いので og:image は付けない。 -->
+  <meta name="description" content="アートメイクのご予約ページです。空き状況の確認とご予約ができます。">
+  <meta property="og:title" content="アートメイクのご予約">
+  <meta property="og:description" content="空き状況の確認とご予約ができます。">
+  <meta property="og:type" content="website">
+  <style id="fbGuard">body{display:none !important}</style>
+  <script>
+  // クリックジャッキング対策（GitHub PagesはX-Frame-Options等のHTTPヘッダ不可のためJSで代替）。
+  // OWASP推奨方式：通常表示なら上の隠しstyleを外す／枠(iframe)内なら本文を隠したまま離脱を試みる。
+  // sandbox属性で離脱(top.location)を封じられても本文が見えないため、クリックの騙し取りが成立しない。
+  if(self===top){var fbg=document.getElementById('fbGuard');if(fbg)fbg.parentNode.removeChild(fbg);}
+  else{top.location=self.location;}
+  // CSP違反の観測（consoleに記録するだけ。外部送信はしない）
+  document.addEventListener('securitypolicyviolation',function(e){console.warn('CSP違反:',e.violatedDirective,e.blockedURI)});
+  </script>
+  <title>JISSO AI 公式LINE</title>
+  <style>
+    /* ===== デザイントークン（色の一括変更スイッチ・2026-06-12 UI刷新）=====
+       見た目はここの変数を直すだけで全体に反映される。多店舗のテーマ色替えもここ。
+       ※機能・レイアウト・表示制御（display等）は従来のまま＝色・装飾のみの変更。 */
+    :root {
+      /* JISSO AI：HP・ロゴの色（navy #0B1F4D / blue #1E6FE6 / pale #EEF4FD）。コピー元のテラコッタから変更。 */
+      --bg: #f5f8fc;            /* 背景 */
+      --surface: #ffffff;       /* カード面 */
+      --ink: #1e2533;           /* 文字 */
+      --muted: #5b6578;         /* 補足文字 */
+      --brand: #1e6fe6;         /* ブランド色：JISSO ブルー */
+      --brand-deep: #0b1f4d;    /* 濃いブランド色：ネイビー */
+      --brand-grad: linear-gradient(135deg, #0b1f4d, #123fc0 55%, #086ae0);
+      --brand-soft: #eef4fd;    /* 選択時のうす色背景 */
+      --brand-line: #d5deec;    /* カードの枠線 */
+      --gold: #38c8eb;          /* 差し色：スカイ */
+      --line: #e3eaf5;          /* 区切り線 */
+      --serif: 'Hiragino Sans','Hiragino Kaku Gothic ProN','Yu Gothic',sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system,'Hiragino Kaku Gothic ProN','Yu Gothic',sans-serif; background:var(--bg); color:var(--ink); line-height:1.6; }
+
+    /* ===== Loading / Done ===== */
+    #s-loading { min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; color:var(--muted); font-size:14px; }
+    #s-done { display:none; min-height:100vh; padding:60px 24px; text-align:center; }
+    .done-icon { font-size:56px; margin-bottom:16px; }
+    .done-title { font-size:21px; font-weight:700; color:var(--brand-deep); margin-bottom:10px; font-family:var(--serif); letter-spacing:.06em; }
+    .done-msg { font-size:14px; color:#5b6578; line-height:1.8; }
+
+    /* ===== Wizard ===== */
+    #s-wizard { display:none; }
+
+    /* ===== Header ===== */
+    .app-hd { background:var(--brand-grad); color:#fff; padding:15px 18px 13px; border-bottom:3px solid var(--gold); }
+    .app-hd h1 { font-size:17px; font-weight:600; font-family:var(--serif); letter-spacing:.14em; }
+    .app-hd .sub { font-size:11.5px; opacity:.85; margin-top:2px; letter-spacing:.05em; }
+
+    /* ===== Progress ===== */
+    .prog-wrap { background:var(--surface); padding:10px 16px 8px; border-bottom:1px solid var(--line); }
+    .prog-dots { display:flex; gap:5px; margin-bottom:4px; }
+    .prog-dot { flex:1; height:4px; background:#ece2d9; border-radius:2px; }
+    .prog-dot.done { background:var(--brand); }
+    .prog-dot.act { background:#d9b9a9; }
+    .prog-lbl { font-size:11px; color:var(--muted); text-align:right; letter-spacing:.04em; }
+
+    /* ===== Content + Nav ===== */
+    .step-wrap { padding:22px 16px 90px; max-width:480px; margin:0 auto; }
+    .step-nav { position:fixed; bottom:0; left:0; right:0; background:rgba(255,255,255,.96); border-top:1px solid var(--line); padding:12px 16px; display:flex; gap:10px; z-index:20; box-shadow:0 -4px 16px rgba(61,52,48,.06); }
+    .s-title { font-size:18px; font-weight:700; margin-bottom:18px; font-family:var(--serif); letter-spacing:.05em; }
+    .s-sub { font-size:13px; color:#7d7268; margin:-12px 0 16px; }
+
+    /* ===== Nurse cards ===== */
+    .nurse-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .nurse-card { background:var(--surface); border:1.5px solid var(--brand-line); border-radius:18px; padding:20px 12px 16px; text-align:center; cursor:pointer; transition:border-color .15s,background .15s,box-shadow .15s; box-shadow:0 2px 10px rgba(140,85,71,.05); }
+    .nurse-card.sel { border-color:var(--brand); background:var(--brand-soft); box-shadow:0 4px 14px rgba(140,85,71,.12); }
+    .n-av { width:72px; height:72px; border-radius:50%; margin:0 auto 10px; display:flex; align-items:center; justify-content:center; font-size:28px; font-weight:800; color:#fff; overflow:hidden; box-shadow:0 0 0 3px #fff, 0 0 0 4px var(--brand-line); }
+    .n-av img { width:100%; height:100%; object-fit:cover; border-radius:50%; }
+    .n-nm { font-size:18px; font-weight:700; font-family:var(--serif); letter-spacing:.04em; }
+    .n-pr { font-size:12px; color:var(--brand-deep); margin-top:4px; font-weight:600; }
+
+    /* ===== Course list ===== */
+    .course-list { display:flex; flex-direction:column; gap:10px; }
+    .course-item { background:var(--surface); border:1.5px solid var(--brand-line); border-radius:14px; padding:14px 16px; cursor:pointer; display:flex; align-items:flex-start; gap:12px; }
+    .course-item.sel { border-color:var(--brand); background:var(--brand-soft); }
+    .c-rd { width:20px; height:20px; border-radius:50%; border:2px solid #d8cabe; flex-shrink:0; margin-top:2px; display:flex; align-items:center; justify-content:center; }
+    .course-item.sel .c-rd { border-color:var(--brand); background:var(--brand); }
+    .c-dot { width:7px; height:7px; border-radius:50%; background:#fff; }
+    .c-body { flex:1; }
+    .c-nm { font-size:14px; font-weight:600; line-height:1.4; }
+    .c-pr { font-size:15px; font-weight:700; color:var(--brand-deep); margin-top:6px; }
+    .c-dur { font-size:11px; color:var(--muted); margin-top:3px; }
+
+    /* ===== Artist accordion (STEP 1) ===== */
+    .art-acc { display:flex; flex-direction:column; gap:14px; max-width:600px; margin:0 auto; }
+    .art-card { background:var(--surface); border:1.5px solid var(--brand-line); border-radius:18px; overflow:hidden; transition:border-color .15s,box-shadow .15s; box-shadow:0 2px 10px rgba(140,85,71,.06); }
+    .art-card.open { border-color:var(--brand); box-shadow:0 6px 20px rgba(140,85,71,.14); }
+    .art-hd { display:flex; align-items:center; gap:16px; padding:18px 18px; cursor:pointer; }
+    .art-av { width:72px; height:72px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:26px; font-weight:800; color:#fff; overflow:hidden; box-shadow:0 0 0 3px #fff, 0 0 0 4px var(--brand-line); }
+    .art-av img { width:100%; height:100%; object-fit:cover; border-radius:50%; }
+    .art-meta { flex:1; }
+    .art-nm { font-size:18px; font-weight:700; font-family:var(--serif); letter-spacing:.04em; }
+    .art-spec { font-size:12.5px; color:#857a70; margin-top:3px; line-height:1.45; }
+    .art-pr { font-size:13px; color:var(--brand-deep); font-weight:700; margin-top:4px; }
+    .art-chev { font-size:15px; color:#cdbfb3; transition:transform .2s,color .2s; flex-shrink:0; }
+    .art-card.open .art-chev { transform:rotate(180deg); color:var(--brand); }
+    .art-panel { border-top:1px solid var(--line); padding:12px 0 14px; background:#fbf6f1; }
+    .art-hint { font-size:11px; color:var(--muted); margin:0 14px 10px; }
+    /* コースは横スクロール（カルーセル）。次のカードが少し見えることで「横に動かせる」と伝える。 */
+    .ac-list { display:flex; gap:10px; overflow-x:auto; scroll-snap-type:x mandatory; -webkit-overflow-scrolling:touch; overscroll-behavior-x:contain; padding:2px 14px 10px; scroll-padding-left:14px; }
+    .ac-list::-webkit-scrollbar { height:4px; }
+    .ac-list::-webkit-scrollbar-thumb { background:#dccdc0; border-radius:2px; }
+    .ac-item { scroll-snap-align:start; flex:0 0 76%; box-sizing:border-box; background:var(--surface); border:1px solid var(--brand-line); border-radius:14px; padding:14px; cursor:pointer; display:flex; flex-direction:column; box-shadow:0 1px 6px rgba(140,85,71,.05); }
+    .ac-item:active { background:var(--brand-soft); border-color:var(--brand); }
+    .ac-top { flex:1; }
+    .ac-cta { margin-top:12px; text-align:center; font-size:13px; font-weight:700; color:#fff; background:var(--brand-grad); border:none; border-radius:10px; padding:10px 4px; letter-spacing:.06em; box-shadow:0 3px 10px rgba(140,85,71,.22); }
+    .s1-hint { flex:1; text-align:center; font-size:12px; color:var(--muted); padding:4px 0; }
+
+    /* ===== Calendar ===== */
+    .cal-nav { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+    .cal-btn { width:36px; height:36px; border:1px solid var(--brand-line); border-radius:50%; background:var(--surface); display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:22px; color:var(--brand-deep); flex-shrink:0; line-height:1; }
+    .cal-btn:disabled { opacity:.25; cursor:default; }
+    .cal-mo { font-size:16px; font-weight:700; font-family:var(--serif); letter-spacing:.08em; }
+    .cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; }
+    .cal-dow { text-align:center; font-size:11px; font-weight:700; color:#b3a698; padding:4px 0 6px; }
+    .cal-dow:first-child { color:#c75d4f; }
+    .cal-dow:last-child { color:#6b7fb3; }
+    .cal-day { aspect-ratio:1; display:flex; align-items:center; justify-content:center; font-size:13px; border-radius:50%; color:#d5c9bd; cursor:default; }
+    .cal-day.avail { color:var(--ink); cursor:pointer; font-weight:600; }
+    .cal-day.avail:active { background:var(--brand-soft); }
+    .cal-day.avail.sun { color:#c75d4f; }
+    .cal-day.avail.sat { color:#6b7fb3; }
+    .cal-day.today { font-weight:800; box-shadow:inset 0 0 0 1.5px var(--brand-line); }
+    .cal-day.sel { background:var(--brand-deep) !important; color:#fff !important; }
+    .cal-day.phantom { visibility:hidden; }
+    .cal-info { font-size:12px; color:var(--muted); margin-top:10px; text-align:center; }
+
+    /* ===== Time slots ===== */
+    .dt-lbl { font-size:15px; font-weight:700; margin-bottom:14px; font-family:var(--serif); letter-spacing:.04em; }
+    .slot-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+    .slot-a { background:var(--surface); border:1.5px solid var(--brand); border-radius:10px; color:var(--brand-deep); font-size:14px; font-weight:600; padding:10px 4px; text-align:center; cursor:pointer; }
+    .slot-a.sel { background:var(--brand-deep); color:#fff; }
+    .slot-a:active { background:var(--brand-soft); }
+    .slot-x { background:#f4ede6; border:1px solid #eadfd5; border-radius:10px; color:#cfc2b5; font-size:18px; padding:10px 4px; text-align:center; }
+
+    /* ===== Form ===== */
+    .field { margin-bottom:18px; }
+    .fl { display:block; font-size:14px; font-weight:600; margin-bottom:6px; }
+    .req { color:#c0392b; margin-left:2px; }
+    input[type=text], input[type=tel], textarea { width:100%; padding:12px; font-size:16px; border:1px solid #d5deec; border-radius:10px; background:var(--surface); -webkit-appearance:none; font-family:inherit; color:var(--ink); }
+    input[type=text]:focus, input[type=tel]:focus, textarea:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 3px rgba(168,112,92,.14); }
+    textarea { resize:vertical; }
+    .ferr { font-size:12px; color:#c0392b; margin-top:4px; display:none; }
+    .radios { display:flex; gap:8px; }
+    .radios label { flex:1; text-align:center; padding:10px; border:1.5px solid #d5deec; border-radius:10px; background:var(--surface); font-size:14px; cursor:pointer; }
+    .radios input { display:none; }
+    .radios label:has(input:checked) { border-color:var(--brand); background:var(--brand-soft); font-weight:600; }
+    .radios-v { display:flex; flex-direction:column; gap:8px; }
+    .radios-v label { padding:10px 14px; border:1.5px solid #d5deec; border-radius:10px; background:var(--surface); font-size:14px; display:flex; align-items:center; gap:10px; cursor:pointer; }
+    .radios-v input[type=radio] { width:18px; height:18px; flex-shrink:0; accent-color:var(--brand); }
+    .radios-v label:has(input:checked) { border-color:var(--brand); background:var(--brand-soft); }
+
+    /* ===== Summary ===== */
+    .sum-box { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:20px; box-shadow:0 2px 10px rgba(140,85,71,.05); }
+    .s-row { display:flex; padding:8px 0; border-bottom:1px solid #f5ede5; }
+    .s-row:last-child { border-bottom:none; }
+    .s-key { font-size:12px; color:var(--muted); width:80px; flex-shrink:0; padding-top:1px; }
+    .s-val { font-size:14px; font-weight:600; flex:1; }
+
+    /* ===== Terms ===== */
+    .sec-lbl { font-size:13px; font-weight:700; color:var(--brand-deep); border-left:3px solid var(--gold); padding-left:8px; margin-bottom:12px; letter-spacing:.04em; }
+    .terms-box { height:180px; overflow-y:auto; border:1px solid #d5deec; border-radius:10px; padding:12px 14px; font-size:12px; color:#334155; background:var(--surface); line-height:1.75; }
+    .terms-box p { margin-bottom:8px; }
+    .terms-box ul { margin:4px 0 10px 18px; padding:0; }
+    .terms-box li { margin-bottom:4px; }
+    .t-hd { font-weight:700; color:var(--ink); display:block; margin:10px 0 4px; }
+    .t-sub { font-weight:700; color:#5d534a; display:block; font-size:11px; margin:6px 0 2px; }
+    .agree-row { display:flex; align-items:flex-start; gap:10px; margin-top:14px; }
+    .agree-row input { width:18px; height:18px; flex-shrink:0; margin-top:2px; accent-color:var(--brand); }
+    .agree-row span { font-size:13px; color:#334155; }
+
+    /* ===== Buttons ===== */
+    .btn { padding:14px; font-size:16px; font-weight:700; border-radius:14px; border:none; cursor:pointer; font-family:inherit; letter-spacing:.04em; }
+    .btn-p { flex:1; background:var(--brand-grad); color:#fff; box-shadow:0 4px 14px rgba(140,85,71,.28); }
+    .btn-p:disabled { background:#ddccc1; box-shadow:none; }
+    .btn-p:active { transform:translateY(1px); }
+    .btn-bk { background:#eef4fd; color:#5b6578; border:1px solid #d5deec; width:76px; flex-shrink:0; font-size:14px; }
+
+    /* ===== Spinner / Error ===== */
+    .ld-box { text-align:center; padding:36px 0; color:var(--muted); font-size:13px; }
+    .spinner { display:inline-block; width:26px; height:26px; border:3px solid #ece1d7; border-top-color:var(--brand); border-radius:50%; animation:spin .8s linear infinite; vertical-align:middle; margin-right:6px; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .msg-err { background:#fdecea; color:#b3261e; padding:12px; border-radius:10px; font-size:13px; }
+    .btn-retry { background:var(--brand-grad); color:#fff; border:none; border-radius:10px; padding:10px 28px; font-size:14px; font-weight:600; cursor:pointer; }
+
+    /* ===== Cancel（お客様によるキャンセル） ===== */
+    #s-cancel { display:none; }
+    #s-cancel .step-wrap { min-height:60vh; }
+    #s-consent { display:none; }
+    #s-consent .step-wrap { min-height:50vh; }
+    #s-inquiry { display:none; }
+    #s-inquiry .step-wrap { min-height:50vh; }
+    #s-inquiry select.q-in, #s-inquiry textarea.q-in { width:100%; box-sizing:border-box; font-size:16px; }
+    #s-questionnaire { display:none; }
+    #s-questionnaire .step-wrap { min-height:50vh; }
+    .q-f { margin:0 0 16px; }
+    .q-l { display:block; font-size:14px; font-weight:600; color:var(--ink); margin:0 0 6px; }
+    .q-req { font-size:11px; color:#c0392b; font-weight:700; margin-left:4px; }
+    .q-in { width:100%; box-sizing:border-box; padding:11px 12px; border:1px solid #d5deec; border-radius:10px; font-size:15px; }
+    .q-opts { display:flex; flex-wrap:wrap; gap:8px 14px; }
+    .q-opt { font-size:14px; color:var(--ink); display:inline-flex; align-items:center; gap:5px; }
+    .cl-loading { text-align:center; color:var(--muted); padding:48px 0; }
+    .cl-intro { font-weight:700; color:var(--brand-deep); margin:0 4px 12px; }
+    .cl-sub { font-weight:400; font-size:12px; color:var(--muted); }
+    .cl-late { font-size:12.5px; color:#c2410c; background:#fff7ed; border:1px solid #fed7aa; border-radius:10px; padding:8px 10px; line-height:1.5; }
+    .cl-card { background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:14px 16px; margin:0 0 12px; box-shadow:0 2px 8px rgba(140,85,71,.06); }
+    .cl-dt { font-weight:800; font-size:16px; color:var(--ink); }
+    .cl-meta { font-size:13px; color:#5b6578; line-height:1.5; margin:4px 0 10px; }
+    .cl-x { width:100%; background:#eef4fd; color:#c2410c; border:1px solid #f0c8c2; }
+    .cl-x:disabled { opacity:.6; }
+    .cl-note { font-size:11.5px; color:#a99e93; margin:8px 4px; line-height:1.5; }
+    .soon-box { text-align:center; padding:48px 16px; color:#5b6578; }
+    .soon-box .done-icon { font-size:46px; }
+
+    /* ===== Consent（同意書：本文→写真Yes/No→指署名→送信） ===== */
+    .cs-greet { font-size:14px; font-weight:700; color:var(--brand-deep); margin:0 2px 6px; }
+    .cs-meta { font-size:12px; color:var(--muted); margin:0 2px 14px; }
+    .cs-read { height:300px; overflow-y:auto; border:1px solid #d5deec; border-radius:10px; padding:14px 16px; font-size:12.5px; color:#334155; background:var(--surface); line-height:1.8; -webkit-overflow-scrolling:touch; }
+    .cs-read h3 { font-size:13px; margin:14px 0 4px; border-left:4px solid var(--brand); padding-left:8px; color:var(--ink); }
+    .cs-read h3:first-child { margin-top:2px; }
+    .cs-read p { margin:0 0 8px; }
+    .cs-read ul { margin:4px 0 10px 18px; padding:0; }
+    .cs-read li { margin-bottom:4px; }
+    .cs-read .cs-sub { font-weight:700; margin:8px 0 2px; color:#5d534a; }
+    .cs-read .cs-note, .cs-read .cs-agree { font-weight:700; }
+    .cs-read .cs-agree { margin:14px 0 2px; color:var(--brand-deep); }
+    .cs-sec { font-size:13px; font-weight:700; color:var(--brand-deep); border-left:3px solid var(--gold); padding-left:8px; margin:22px 0 6px; letter-spacing:.04em; }
+    .cs-photo-note { font-size:12px; color:#7d7268; margin:0 2px 12px; line-height:1.7; }
+    .cs-q { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:10px; }
+    .cs-q-label { font-size:13px; color:var(--ink); margin-bottom:8px; line-height:1.5; }
+    .cs-yn { display:flex; gap:8px; }
+    .cs-yn button { flex:1; padding:9px 4px; font-size:14px; font-weight:600; border:1.5px solid #d5deec; border-radius:10px; background:var(--surface); color:#5b6578; cursor:pointer; font-family:inherit; }
+    .cs-yn button.on-yes { border-color:var(--brand); background:var(--brand); color:#fff; }
+    .cs-yn button.on-no { border-color:#c2410c; background:#eef4fd; color:#c2410c; }
+    .cs-sign-wrap { margin-top:6px; }
+    .cs-sign-hd { display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
+    .cs-sign-hd .lbl { font-size:13px; font-weight:700; color:var(--ink); }
+    .cs-sign-clear { background:#eef4fd; color:#5b6578; border:1px solid #d5deec; border-radius:8px; padding:6px 14px; font-size:13px; cursor:pointer; font-family:inherit; }
+    #consentCanvas { width:100%; height:200px; background:#fff; border:1px solid #c9bbae; border-radius:10px; touch-action:none; display:block; }
+    .cs-sign-hint { font-size:11.5px; color:var(--muted); margin:6px 2px 0; }
+    .cs-submit-err { margin-top:12px; }
+    .cs-done .done-icon { font-size:52px; margin-bottom:14px; }
+
+    /* ===== 他院修正の注意（経験「有」のお客様にだけ確認画面で表示） ===== */
+    .fix-note { background:#fff7e6; border:1.5px solid #f0a020; border-radius:12px; padding:13px 15px; margin:16px 0; font-size:12.5px; color:#8a4b00; line-height:1.75; }
+    .fix-note-hd { font-weight:800; color:#b45309; font-size:14px; margin-bottom:7px; }
+    .fix-note p { margin:0 0 6px; }
+    .fix-note ul { margin:6px 0 0 18px; padding:0; }
+    .fix-note li { margin-bottom:4px; }
+  </style>
+</head>
+<body>
+
+<div id="s-loading">
+  <div><span class="spinner"></span>読み込み中…</div>
+</div>
+
+<!-- ★流入リンクの着地画面（mode=land）・LINE の中の記録（mode=join）（2026-10-05）。中身は下の startJoinEarly が DOM で組む。 -->
+<div id="s-join" style="display:none"></div>
+
+<div id="s-wizard">
+  <div class="app-hd">
+    <h1>ご予約</h1>
+    <div class="sub" id="hSub"></div>
+  </div>
+  <div class="prog-wrap">
+    <div class="prog-dots" id="progDots"></div>
+    <div class="prog-lbl" id="progLbl"></div>
+  </div>
+  <div class="step-wrap" id="sc"></div>
+  <nav class="step-nav" id="sn"></nav>
+</div>
+
+<div id="s-done">
+  <div class="done-icon">✅</div>
+  <div class="done-title">ご予約を承りました</div>
+  <div class="done-msg">確認のメッセージをLINEにお送りします。<br>お会いできるのを楽しみにしております。</div>
+  <button class="btn btn-p" id="backBtn" onclick="backToTalk()" style="display:inline-block;margin-top:28px;padding-left:40px;padding-right:40px;">LINEのトークに戻る</button>
+</div>
+
+<!-- キャンセル(s-cancel)は実装済み（中身はJSが描画）。同意書(s-consent)はまだ準備中案内のみ。 -->
+<div id="s-cancel">
+  <div class="app-hd"><h1>ご予約のキャンセル</h1></div>
+  <div class="step-wrap">
+    <div id="cancelBody"><div class="cl-loading">ご予約を確認しています…</div></div>
+  </div>
+</div>
+
+<div id="s-consent">
+  <div class="app-hd"><h1>アートメイク同意書</h1></div>
+  <div class="step-wrap">
+    <div id="consentBody"><div class="cl-loading">同意書を読み込んでいます…</div></div>
+  </div>
+</div>
+
+<div id="s-inquiry">
+  <div class="app-hd"><h1>研修のご相談・お問い合わせ</h1></div>
+  <div class="step-wrap">
+    <div id="inqBody"><div class="cl-loading">読み込んでいます…</div></div>
+  </div>
+</div>
+
+<div id="s-questionnaire">
+  <div class="app-hd"><h1>事前問診票</h1></div>
+  <div class="step-wrap">
+    <div id="qBody"><div class="cl-loading">読み込んでいます…</div></div>
+  </div>
+</div>
+
+<script>
+// ===== 流入リンクの帰属：着地画面（mode=land）と LINE の中の記録（mode=join）（2026-10-05） =====
+//   設計：docs/ref-join-tracking-design-2026-10-03.md。正本は poc/_pure.mjs（tests/ref_join_page.test.mjs で一致を確認）。
+//   ★この script は LIFF SDK の読み込みより前に動く＝SDK の取得が固まっても、友だち追加へ進む画面とボタンは出る。
+//   ★mode が land / join でなければ何もしない（予約・キャンセル・同意書・問診は今まで通り）。
+var JOIN_CONFIG_BY_SLUG = {
+  jisso: { joinLiffId: "2012216970-IY65xFfn", oaId: "@689vpzqg", addFriendUrl: "https://lin.ee/QLXlkgq", storeName: "JISSO AI" },
+};
+var JOIN_URL_FORM = 'A';
+function sanitizeJoinTag(s){
+  return String(s == null ? "" : s).toLowerCase().replace(/[^a-z0-9-]/g, "").replace(/^-+|-+$/g, "").slice(0, 64);
+}
+function getJoinConfig(slug){
+  var key = sanitizeJoinTag(slug);
+  if (!Object.prototype.hasOwnProperty.call(JOIN_CONFIG_BY_SLUG, key)) return null;
+  var c = JOIN_CONFIG_BY_SLUG[key];
+  if (!c || !/^@[0-9a-z]{6,12}$/.test(c.oaId) || !/^https:\/\/lin\.ee\/[0-9A-Za-z]+$/.test(c.addFriendUrl)) return null;
+  var liff = /^\d{10}-[A-Za-z0-9]{8}$/.test(c.joinLiffId) ? c.joinLiffId : "";
+  // お店の名前（画面に出す）。文字は textContent でしか使わないが、念のため長さと山かっこを確認。
+  var name = (typeof c.storeName === "string" && c.storeName.length <= 40 && !/[<>]/.test(c.storeName)) ? c.storeName : "";
+  return { slug: key, joinLiffId: liff, oaId: c.oaId, addFriendUrl: c.addFriendUrl, storeName: name };
+}
+function detectLandEnv(ua){
+  var s = String(ua == null ? "" : ua);
+  if (/\bLine\/\d/i.test(s)) return "line";
+  if (/iPhone|iPad|iPod|Android/i.test(s)) return "mobile";
+  return "pc";
+}
+function buildJoinLiffUrl(cfg, ref, form){
+  if (!cfg || !cfg.joinLiffId) return "";
+  var tag = sanitizeJoinTag(ref);
+  if (!tag) return "";
+  var head = form === "B" ? "https://line.me/R/app/" : "https://liff.line.me/";
+  return head + cfg.joinLiffId + "?store=" + cfg.slug + "&mode=join&ref=" + tag;
+}
+function buildAddFriendInLineUrl(cfg){
+  if (!cfg || !/^@[0-9a-z]{6,12}$/.test(cfg.oaId)) return "";
+  return "https://line.me/R/ti/p/" + encodeURIComponent(cfg.oaId);
+}
+function buildTalkUrl(cfg){
+  if (!cfg || !/^@[0-9a-z]{6,12}$/.test(cfg.oaId)) return "";
+  return "https://line.me/R/oaMessage/" + encodeURIComponent(cfg.oaId) + "/";
+}
+function decideLandAction(env, cfg, ref){
+  if (!cfg) return "none";
+  var liffUrl = buildJoinLiffUrl(cfg, ref, JOIN_URL_FORM);
+  if (env === "pc") return "to_addfriend";
+  if (!liffUrl) return "to_addfriend"; // LIFF が無い・タグが無い＝記録できない → 今と同じく lin.ee へ（1タップ増やさない）
+  return env === "line" ? "to_liff" : "buttons";
+}
+function decideJoinNext(friendFlag){
+  return friendFlag === true ? "talk" : "addfriend";
+}
+// 画面の部品（文字は textContent・リンクは href だけ＝HTML を文字列で作らない）
+function joinEl(tag, text, cls){
+  var e=document.createElement(tag); if(text) e.textContent=text; if(cls) e.className=cls;
+  if(tag==='p'){ e.style.marginTop='14px'; e.style.lineHeight='1.7'; }
+  return e;
+}
+function joinLinkBtn(href, text, primary){
+  var a=document.createElement('a'); a.href=href; a.textContent=text;
+  a.className = primary ? 'btn btn-p' : 'btn btn-bk';
+  a.style.display='block'; a.style.width='100%'; a.style.boxSizing='border-box'; a.style.textAlign='center';
+  a.style.textDecoration='none'; a.style.marginTop='12px';
+  return a;
+}
+function joinBox(){
+  var box=document.getElementById('s-join'); if(!box) return null;
+  while(box.firstChild) box.removeChild(box.firstChild);
+  box.style.display='block'; box.style.padding='32px 20px'; box.style.maxWidth='420px'; box.style.margin='0 auto';
+  return box;
+}
+function renderLand(cfg, ref, env){
+  var box=joinBox(); if(!box) return;
+  var act=decideLandAction(env, cfg, ref);
+  if(act==='none'){
+    box.appendChild(joinEl('p','お店のLINEを開けませんでした。お手数ですが、お店のInstagramなどから、もう一度お試しください。'));
+    return;
+  }
+  // お店の名前を1行（知らないページに来たと不安にならないように・2026-10-06 仁義さん）。
+  if(cfg.storeName) box.appendChild(joinEl('p', cfg.storeName + 'の公式LINEです'));
+  box.appendChild(joinEl('h1','LINEで友だち追加'));
+  var liffUrl=buildJoinLiffUrl(cfg, ref, JOIN_URL_FORM);
+  if(act==='buttons'){
+    box.appendChild(joinEl('p','下のボタンからLINEを開いて、友だち追加をお願いします。'));
+    box.appendChild(joinLinkBtn(liffUrl,'LINEで開く（おすすめ）',true));
+    box.appendChild(joinLinkBtn(cfg.addFriendUrl,'友だち追加だけする',false));
+    box.appendChild(joinEl('p','うまく開かないときは、画面の右上（または右下）の「…」から「ブラウザで開く」を選んでから、もう一度ボタンを押してください。'));
+  }else{
+    box.appendChild(joinEl('p','下のボタンから友だち追加をお願いします。'));
+    box.appendChild(joinLinkBtn(cfg.addFriendUrl,'友だち追加する',true));
+  }
+  // 画面を出してから移動する（移動できなかったときもボタンが残る）。
+  if(act==='to_liff') location.replace(liffUrl);
+  else if(act==='to_addfriend') location.replace(cfg.addFriendUrl);
+}
+function goJoinAddFriend(cfg){
+  var url=buildAddFriendInLineUrl(cfg) || (cfg && cfg.addFriendUrl) || '';
+  if(url) location.replace(url);
+}
+// 下の getQueryParam と同じ読み方（通常のクエリ → 無ければ liff.state の中）。LINE は追加の値を liff.state に包むことがある。
+function joinParam(name){
+  try{
+    var sp = new URLSearchParams(location.search);
+    var v = sp.get(name);
+    if(v) return v;
+    var ls = sp.get('liff.state');
+    if(ls){
+      var inner = new URLSearchParams(ls.charAt(0)==='?' ? ls.slice(1) : ls);
+      var v2 = inner.get(name);
+      if(v2) return v2;
+    }
+  }catch(e){}
+  return null;
+}
+function startJoinEarly(){
+  var mode=joinParam('mode')||'';
+  if(mode!=='land'&&mode!=='join') return;
+  window.__JOIN_MODE=mode;
+  var ld=document.getElementById('s-loading'); if(ld) ld.style.display='none';
+  var cfg=getJoinConfig(joinParam('store'));
+  if(mode==='land'){ renderLand(cfg, joinParam('ref'), detectLandEnv(navigator.userAgent)); return; }
+  // join：LINE の中の LIFF。記録とその後の振り分けは SDK 読み込み後の runJoin が行う。
+  //   ここでは「待っています」の表示と、友だち追加画面への逃げ道（ボタン・8秒の上限）だけを先に用意する。
+  var box=joinBox(); if(!box) return;
+  box.appendChild(joinEl('p',(cfg && cfg.storeName ? cfg.storeName + 'の公式LINEを' : 'LINEで') + '開いています…'));
+  var url=buildAddFriendInLineUrl(cfg) || (cfg && cfg.addFriendUrl) || '';
+  if(url) box.appendChild(joinLinkBtn(url,'友だち追加の画面へ進む',false));
+  window.__JOIN_FALLBACK=setTimeout(function(){ goJoinAddFriend(cfg); }, 8000);
+}
+startJoinEarly();
+</script>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+// ===== Supabase 接続設定（公開キー＝埋め込みOK・RLSで保護） =====
+var SB_URL    = "https://iyuqkkpqvvmhqrswhjpi.supabase.co";
+var SB_KEY    = "sb_publishable_Ssy-mq3_-U-jSUaTqnSOuA_9Jvjo1PS";
+// ↓は「既定（久留米）」の初期値。起動時に resolveStoreConfig() が ?store= スラッグから
+//   stores を引いて、その店の値に上書きする（小倉など）。取得失敗時はこの既定のまま。
+// JISSO AI：既定値は持たない。必ず ?store=<スラッグ> から店を引く（アートメイクの久留米既定を削除）。
+var STORE_ID  = "";
+var TENANT_ID = "";
+var LIFF_ID   = "";
+var STORE_NAME = "JISSO AI";
+// LINE連携：確定メッセージ・スタッフ通知は Supabase Edge Function（notify-reservation）に依頼。
+var EDGE_NOTIFY = SB_URL + "/functions/v1/notify-reservation";
+
+// LIFFは元のクエリ(?ref=...)を、環境によって location.search に直接、または ?liff.state=... に包んで渡す。
+// 両方を見て確実に取り出す。
+function getQueryParam(name){
+  try{
+    var sp = new URLSearchParams(location.search);
+    var v = sp.get(name);
+    if(v) return v;
+    var ls = sp.get('liff.state');
+    if(ls){
+      var inner = new URLSearchParams(ls.charAt(0)==='?' ? ls.slice(1) : ls);
+      var v2 = inner.get(name);
+      if(v2) return v2;
+    }
+  }catch(e){}
+  return null;
+}
+var STORE_RAW = getQueryParam('store');         // 明示指定された店舗slug（無ければ null）。
+var STORE = STORE_RAW || 'jisso';               // JISSO AI：店舗slug（既定 jisso）。resolveStoreConfig() で店設定を解決。
+// JISSO AI：既定は問い合わせフォーム。予約・キャンセル・同意書・問診は使わないので、すべて問い合わせへ回す。
+var MODE  = getQueryParam('mode')  || 'inquiry';
+if (['book','cancel','consent','questionnaire'].indexOf(MODE) >= 0) MODE = 'inquiry';
+var REF   = getQueryParam('ref')   || '';       // 流入元タグ（集客：?ref= で来た予約に記録）
+var INIT_ARTIST = getQueryParam('artist') || ''; // 症例写真ページから来た時に最初から開くアーティストID。
+
+// コース選択はイベント委譲（data-* から取得）。onclick に名前を文字列連結しない＝XSS/壊れ防止。
+// ★メニュー名で価格区分を決める運用(patch-48前期)は撤回（メニュー名管理が煩雑になる）。
+//   patch-48後期：お客様が STEP6 確認画面で「モニターあり／無し」を選ぶ運用に変更。
+//   ・monitor_price < normal_price のメニューだけ「ご予約形態」を選ばせる（同額・未設定は通常扱い）。
+//   ・選択結果は st.monitorChoice ∈ {null,'yes','no'}。未選択（null）では予約ボタンが押せない。
+document.addEventListener('click', function(e){
+  var it = (e.target && e.target.closest) ? e.target.closest('.ac-item') : null;
+  if(!it) return;
+  pickCourse(it.getAttribute('data-nid'), it.getAttribute('data-nm'),
+             it.getAttribute('data-mid'), it.getAttribute('data-mn'),
+             parseInt(it.getAttribute('data-pr'),10)||0, parseInt(it.getAttribute('data-du'),10)||0,
+             parseInt(it.getAttribute('data-prm'),10)||0);  // ★モニター価格
+});
+
+// 営業時間／刻みのフォールバック（stores が取れない場合のみ使用）
+var DEF_OPEN_H = 9, DEF_CLOSE_H = 19, DEF_INTERVAL = 30;
+
+var H = { "apikey": SB_KEY, "Authorization": "Bearer " + SB_KEY };
+
+// ===== Supabase RPC =====
+// 公開ページはテーブルを直接読まず、許可リスト化したSECURITY DEFINER RPCだけを呼ぶ。
+function sbRpc(fn, args){
+  return fetch(SB_URL + "/rest/v1/rpc/" + fn, {
+    method:"POST", headers: Object.assign({ "Content-Type":"application/json" }, H), body: JSON.stringify(args||{})
+  }).then(function(r){ return r.json().then(function(j){ return { ok:r.ok, status:r.status, data:j }; }, function(){ return { ok:r.ok, status:r.status, data:null }; }); });
+}
+// ===== 本人確認つき操作（#92）：キャンセル・同意書は Edge Function(liff-action) 経由 =====
+// LINEのIDトークン(st.idToken)を送り、サーバー側でLINEに照合→確認できた本人だけが実行できる。
+// 戻り値は sbRpc と同じ { ok, status, data } 形（失敗時 data.message にエラー種別）。
+// ※Supabase上の関数スラッグは super-api（表示名は liff-action）。エンドポイントはスラッグ側を使う。
+var EDGE_LIFF = SB_URL + "/functions/v1/super-api";
+function sbEdge(action, args){
+  var body = Object.assign({ action: action, id_token: (st.idToken||'') }, args||{});
+  // ★apikey/Authorization(anonキー)も送る＝Edge FunctionのVerify JWTがON/OFFどちらでも通る。
+  //   本人確認はあくまでサーバ側のLINE IDトークン検証で担保（anonキーは公開前提・ゲート通過用）。
+  return fetch(EDGE_LIFF, {
+    method:"POST", headers: Object.assign({ "Content-Type":"application/json" }, H), body: JSON.stringify(body)
+  }).then(function(r){
+    return r.json().then(function(j){
+      return { ok: !!(j && j.ok), status:r.status, data:(j ? j.data : null) };
+    }, function(){ return { ok:false, status:r.status, data:null }; });
+  });
+}
+
+// ===== 状態 =====
+var st = {
+  step:1, uid:'', displayName:'', idToken:'', options:null,
+  openArtist:null,
+  nurseId:null, nurseName:null,
+  menuId:null,  menuName:null,  menuPrice:null, menuPriceMonitor:null, menuDur:null, menuType:'new',
+  monitorChoice:null,  // ★STEP6で「モニターあり/無し」をお客様が選ぶ。null=未選択（予約ボタンOFF）
+  date:null,    time:null,
+  calYear:new Date().getFullYear(), calMonth:new Date().getMonth()+1,
+  availDates:null,  // null=未取得、Set=取得済み
+  slots:null,       // null=未取得、配列=取得済み
+  adErr:false,      // 空き日の取得に失敗したか（true=通信エラー。「空き無し」とは区別する）
+  slErr:false,      // 空き枠の取得に失敗したか（true=通信エラー。「空き無し」とは区別する）
+  slCache:{},       // 空き枠キャッシュ（nurse|menu|date → 配列）。日付タップ時の先読みもここへ保存。
+  furigana:'', custName:'', phone:'',
+  coupon:'no', artExp:'', memo:'', agreed:false,
+  idemKey:null,     // ★#94 冪等キー：この予約内容ひと組に1つ。二度押し・通信リトライで同じキーを使い回し、DB側で2件入るのを防ぐ。
+};
+// ★#94 冪等キー：未生成なら crypto.randomUUID() で1つ作って保持し、以後の再送（二度押し/リトライ）で同じキーを使い回す。
+//   予約内容が変わったとき（満席で時間を選び直す等）と予約成立後は newIdemKey() で破棄し、次は別キーにする。
+function getIdemKey(){
+  if(!st.idemKey){
+    try{ st.idemKey = (crypto && crypto.randomUUID) ? crypto.randomUUID() : null; }catch(e){ st.idemKey = null; }
+    // 古い端末で crypto.randomUUID が無い場合のフォールバック（十分に衝突しにくい一意値）。
+    if(!st.idemKey){ st.idemKey = 'idem-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)+Math.random().toString(36).slice(2); }
+  }
+  return st.idemKey;
+}
+function newIdemKey(){ st.idemKey = null; }
+var TODAY = (function(){ var d=new Date(); d.setHours(0,0,0,0); return d; })();
+// 予約可能日の下限（今日から3日後から）。久留米・薬院と同じ締切（2026-09-24）。スタッフの手入力は対象外。
+var MIN_DATE = (function(){ var d=new Date(TODAY.getTime()); d.setDate(d.getDate()+3); return d; })();
+var INIT_Y = MIN_DATE.getFullYear(), INIT_M = MIN_DATE.getMonth()+1;
+// 予約可能日の上限（今日から60日先まで）。
+var MAX_DATE = (function(){ var d=new Date(TODAY.getTime()); d.setDate(d.getDate()+60); return d; })();
+
+// ===== ユーティリティ =====
+function p2(n){ return n<10?'0'+n:''+n; }
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function isT(v){ if(v===true||v===1)return true; if(typeof v==='string'){var t=v.trim().toLowerCase();return t==='true'||t==='1';}return false; }
+function okPhone(v){ return /^0\d{9,10}$/.test(v.replace(/[-\s]/g,'')); }
+function showScr(id){
+  ['s-loading','s-wizard','s-done','s-cancel','s-consent','s-questionnaire','s-inquiry'].forEach(function(s){ document.getElementById(s).style.display='none'; });
+  document.getElementById(id).style.display='block';
+}
+function ymd(d){ return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate()); }
+// "09:00:00" / "09:00" / 9 → 分(int)。不正なら fb。
+function hmToMin(v, fb){
+  if(v==null) return fb;
+  if(typeof v==='number') return v*60;
+  var m=String(v).match(/^(\d{1,2}):(\d{2})/);
+  if(!m) return fb;
+  return parseInt(m[1],10)*60+parseInt(m[2],10);
+}
+
+// ===== プログレスバー =====
+var SN = ['アーティスト・コース','日時','お客様情報','確認・同意'];
+function renderProg(){
+  var current=st.step>=4?st.step-1:st.step;
+  var h=''; for(var i=1;i<=4;i++) h+='<div class="prog-dot'+(i<current?' done':i===current?' act':'')+'"></div>';
+  document.getElementById('progDots').innerHTML=h;
+  document.getElementById('progLbl').textContent='STEP '+current+' / 4　'+SN[current-1];
+}
+
+// ===== メインレンダラ =====
+// 内部番号4/5は維持。旧時間画面(3)への復帰も日時画面(2)へ集約する。
+function render(){ renderProg(); window.scrollTo(0,0); [null,s1,s3,s3,s5,s6][st.step](); }
+function go(n){ st.step=n===3?2:n; render(); }
+
+// ===== STEP 1: アーティスト＆コース（アコーディオン） =====
+var AC=['#123fc0','#1e6fe6','#0b1f4d','#0c9bdd']; // 写真未設定時の頭文字アイコン背景（テーマ暖色系・2026-06-12）
+
+// コースの並び順：管理画面の「表示順」(sort_order・小さいほど上)を最優先する。
+// 表示順が未設定(null)のメニューだけ、従来の名前キーワード規則へ落とす：
+// ①眉セット ②眉通常価格 ③眉他院修正 ④眉リタッチ再来 ⑤リップセット ⑥リップ通常価格。
+// 各グループ内は安い順（再来だけは「2回目→3回目」の回数順）。
+function sortCourses(menus){
+  function info(m){
+    var nm=m.menu_name||'';
+    var lip=nm.indexOf('リップ')>=0, ret=nm.indexOf('再来')>=0, fix=nm.indexOf('他院修正')>=0;
+    var set=nm.indexOf('セット')>=0||nm.indexOf('割引コース')>=0;
+    var base = lip ? (set?5:6) : (ret?4 : fix?3 : set?1 : 2);
+    var sub;
+    if(ret){ var mt=nm.match(/(\d+)回目/); sub=mt?parseInt(mt[1],10):99; }
+    else { var p=parseInt(m.normal_price,10); sub=isNaN(p)?9999999:p; }
+    return { base:base, sub:sub };
+  }
+  return menus.slice().sort(function(a,b){
+    var sa=(a.sort_order==null)?Infinity:a.sort_order;
+    var sb=(b.sort_order==null)?Infinity:b.sort_order;
+    if(sa!==sb) return sa-sb;
+    var ia=info(a), ib=info(b);
+    return ia.base!==ib.base ? ia.base-ib.base : ia.sub-ib.sub;
+  });
+}
+function s1(){
+  var ns=(st.options.nurses||[]).filter(function(n){return isT(n.is_active);});
+  var single=ns.length===1;
+  var h='<div class="s-title">'+(single?'コースを選んでください':'アーティストを選んでください')+'</div>';
+  h+='<div class="s-sub">'+(single?'ご希望のコースを選ぶと、日付の選択に進みます。':'お名前をタップすると、コースと料金が表示されます。')+'</div>';
+  h+='<div class="art-acc">';
+  ns.forEach(function(n,i){
+    // このアーティストが対応できるメニュー（認定済み）
+    var cert=(st.options.certified||[]).filter(function(c){return String(c.nurse_id)===String(n.nurse_id)&&isT(c.is_certified);});
+    var cm={}; cert.forEach(function(c){cm[String(c.menu_id)]=c;});
+    var menus=sortCourses((st.options.menus||[]).filter(function(m){return cm[String(m.menu_id)];}));
+    // ヘッダーの「〜」価格は全コース中の最安値。
+    //   ★monitor_price < normal_price なら monitor 側を最安候補に入れる（patch-48）。
+    //     お客様視点で「ここから始まる最安値」を見せたいので、設定があれば安い方を使う。
+    var minP=null;
+    menus.forEach(function(m){
+      var pn=parseInt(m.normal_price,10);
+      var pm=parseInt(m.monitor_price,10);
+      var p=(!isNaN(pm)&&pm>0&&pm<pn)?pm:pn;
+      if(!isNaN(p)&&p>0&&(minP===null||p<minP))minP=p;
+    });
+    var av=n.profile_photo_url
+      ?'<div class="art-av"><img src="'+esc(n.profile_photo_url)+'" alt="'+esc(n.name)+'"></div>'
+      :'<div class="art-av" style="background:'+AC[i%AC.length]+'">'+esc((n.name||'?').charAt(0).toUpperCase())+'</div>';
+    var open=String(n.nurse_id)===String(st.openArtist);
+    h+='<div class="art-card'+(open?' open':'')+'">';
+    h+='<div class="art-hd" onclick="toggleArt(\''+esc(n.nurse_id)+'\')">';
+    var specBits=[]; if(n.qualification)specBits.push(n.qualification); if(n.specialty)specBits.push(n.specialty);
+    h+=av+'<div class="art-meta"><div class="art-nm">'+esc(n.name)+'</div>';
+    if(specBits.length)h+='<div class="art-spec">'+esc(specBits.join('・'))+'</div>';
+    if(minP)h+='<div class="art-pr">¥'+minP.toLocaleString()+'〜</div>';
+    h+='</div><div class="art-chev">&#9660;</div></div>';
+    if(open){
+      h+='<div class="art-panel"><div class="art-hint">コースを横にスライドして選べます。タップすると日時の選択へ進みます。</div>';
+      h+='<div class="ac-list">';
+      menus.forEach(function(m){
+        var c=cm[String(m.menu_id)];
+        var isRet=isRetouchMenu(m.menu_name);
+        var dm=c?parseInt(isRet?c.duration_retouch_min:c.duration_new_min,10):0;
+        var dt=dm>0?Math.floor(dm/60)+'時間'+(dm%60>0?dm%60+'分':''):'';
+        // ★patch-48：STEP1は「通常 ¥◯ ／ モニター ¥◯」併記。お客様が両方の価格を一目で把握できる。
+        //   monitor_price が未設定 or normal_price と同額なら従来通り単独表示（混乱回避）。
+        var p=parseInt(m.normal_price,10);
+        var pm=parseInt(m.monitor_price,10);
+        var hasMon=(!isNaN(pm)&&pm>0&&pm<p);
+        var pt;
+        if(hasMon){
+          pt='通常 ¥'+p.toLocaleString()+' ／ モニター ¥'+pm.toLocaleString()+'（税込）';
+        } else {
+          pt=(!isNaN(p)&&p>0)?'¥'+p.toLocaleString()+'（税込）':'';
+        }
+        h+='<div class="ac-item" data-nid="'+esc(n.nurse_id)+'" data-nm="'+esc(n.name)+'" data-mid="'+esc(m.menu_id)+'" data-mn="'+esc(m.menu_name)+'" data-pr="'+(p||0)+'" data-prm="'+(hasMon?pm:0)+'" data-du="'+(dm||0)+'">';
+        h+='<div class="ac-top"><div class="c-nm">'+esc(m.menu_name)+'</div>';
+        if(pt)h+='<div class="c-pr">'+pt+'</div>';
+        if(dt)h+='<div class="c-dur">施術時間：'+dt+'</div>';
+        // ★patch-48改：モニター価格があるメニューは「どっちで予約するか」を確認画面で選ぶ運用＝
+        //   STEP1段階でお客様が「結局どっちの金額なの？」と迷わないよう、案内文を表示する。
+        if(hasMon) h+='<div class="c-note" style="font-size:12px;color:#6b7280;margin-top:4px">※通常価格／モニター価格は、この後の確認画面でお選びいただけます</div>';
+        h+='</div><div class="ac-cta">このコースで予約 →</div></div>';
+      });
+      h+='</div></div>';
+    }
+    h+='</div>';
+  });
+  h+='</div>';
+  document.getElementById('sc').innerHTML=h;
+  document.getElementById('sn').innerHTML='<div class="s1-hint">'+(single?'コースをお選びください':'アーティストとコースをお選びください')+'</div>';
+}
+function applyInitialArtist(){
+  if(st.openArtist || !st.options) return;
+  var ns=st.options.nurses||[];
+  for(var i=0;i<ns.length;i++){
+    if(INIT_ARTIST && isT(ns[i].is_active) && String(ns[i].nurse_id)===String(INIT_ARTIST)){
+      st.openArtist=INIT_ARTIST;
+      return;
+    }
+  }
+  // 有効な担当者が1人なら、名前を押さなくてもコースを見せる。
+  // コース自体は選択しない。複数人の店舗と既存の指名リンクは従来どおり。
+  var active=ns.filter(function(n){ return isT(n.is_active); });
+  if(active.length===1) st.openArtist=active[0].nurse_id;
+}
+// アコーディオンの開閉（同時に開くのは1人だけ）
+function toggleArt(id){
+  st.openArtist=(String(st.openArtist)===String(id))?null:id;
+  s1();
+}
+// 新規/リタッチの判定（正本は poc/_pure.mjs の isRetouchMenu・tests/booking_page_pure.test.mjs で一致を確認）。
+function isRetouchMenu(name){var n=String(name||'');return n.indexOf('再来')>=0||n.indexOf('リタッチ')>=0||/[2２]回目/.test(n);}
+// コース確定：アーティスト＋コースを一度に確定し、日付選択（STEP2）へ直行する。
+function pickCourse(nid,nname,mid,mname,price,dur,priceMonitor){
+  st.nurseId=nid; st.nurseName=nname;
+  st.menuId=mid; st.menuName=mname; st.menuPrice=price; st.menuPriceMonitor=priceMonitor||0; st.menuDur=dur;
+  st.monitorChoice=null;  // ★コース選択時は「モニター有無」をリセット＝STEP6で必ず選び直してもらう
+  st.menuType=isRetouchMenu(mname)?'retouch':'new';
+  st.openArtist=nid;
+  st.date=null; st.time=null; st.availDates=null; st.slots=null; st.adErr=false; st.slErr=false;
+  st.slCache={};
+  slotVersion++;
+  go(2);
+}
+
+// ===== 店舗の営業時間／刻み／定休日 =====
+// stores から取得（business_hours_start / business_hours_end / slot_interval_min / closed_days）。
+// closed_days は自由記述文字列。曜日名（例「月曜」）や YYYY-MM-DD が含まれていれば該当日を除外する。
+function storeOpenMin(){ return st.options&&st.options.openMin!=null ? st.options.openMin : DEF_OPEN_H*60; }
+function storeCloseMin(){ return st.options&&st.options.closeMin!=null ? st.options.closeMin : DEF_CLOSE_H*60; }
+function storeInterval(){ var v=st.options&&st.options.interval; return (v&&v>0)?v:DEF_INTERVAL; }
+var DOWJA=['日','月','火','水','木','金','土'];
+function parseClosed(s){
+  // 戻り値 { dows:Set<0..6>, dates:Set<'YYYY-MM-DD'> }
+  var dows=new Set(), dates=new Set();
+  if(!s) return { dows:dows, dates:dates };
+  var txt=String(s);
+  // 個別日（YYYY-MM-DD / YYYY/MM/DD）
+  (txt.match(/\d{4}[-\/]\d{1,2}[-\/]\d{1,2}/g)||[]).forEach(function(d){
+    var m=d.match(/(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+    if(m) dates.add(m[1]+'-'+p2(parseInt(m[2],10))+'-'+p2(parseInt(m[3],10)));
+  });
+  // 曜日名
+  for(var i=0;i<7;i++){ if(txt.indexOf(DOWJA[i])>=0) dows.add(i); }
+  if(/日曜/.test(txt)) dows.add(0);
+  if(/[Ss]un/.test(txt)) dows.add(0);
+  if(/[Mm]on/.test(txt)) dows.add(1);
+  if(/[Tt]ue/.test(txt)) dows.add(2);
+  if(/[Ww]ed/.test(txt)) dows.add(3);
+  if(/[Tt]hu/.test(txt)) dows.add(4);
+  if(/[Ff]ri/.test(txt)) dows.add(5);
+  if(/[Ss]at/.test(txt)) dows.add(6);
+  return { dows:dows, dates:dates };
+}
+function isClosedDay(d){
+  var c=st.options&&st.options.closed; if(!c) return false;
+  if(c.dows.has(d.getDay())) return true;
+  if(c.dates.has(ymd(d))) return true;
+  return false;
+}
+// 予約可能な「候補日」か（3日後〜60日先・定休日除外）。空き有無は別途 busy_ranges で判定。
+function isBookableDay(d){
+  if(d<MIN_DATE) return false;
+  if(d>MAX_DATE) return false;
+  if(isClosedDay(d)) return false;
+  return true;
+}
+
+// ===== STEP 3: 日付選択 =====
+var DOW=['日','月','火','水','木','金','土'];
+function s3(){
+  var ms=p2(st.calMonth), dcnt=new Date(st.calYear,st.calMonth,0).getDate();
+  var first=new Date(st.calYear,st.calMonth-1,1).getDay();
+  var canPrev=!(st.calYear===INIT_Y&&st.calMonth===INIT_M);
+  // 翌月以降に候補日が無ければ「次へ」を止める（60日上限）。
+  var nextFirst=new Date(st.calYear,st.calMonth,1);
+  var canNext=(nextFirst<=MAX_DATE);
+  var h='<div class="s-title">日時を選んでください</div>';
+  h+='<div class="cal-nav">';
+  h+='<button class="cal-btn" onclick="calMv(-1)" '+(canPrev?'':'disabled')+'>&#8249;</button>';
+  h+='<div class="cal-mo">'+st.calYear+'年'+st.calMonth+'月</div>';
+  h+='<button class="cal-btn" onclick="calMv(1)" '+(canNext?'':'disabled')+'>&#8250;</button></div>';
+  h+='<div class="cal-grid">';
+  DOW.forEach(function(d){h+='<div class="cal-dow">'+d+'</div>';});
+  for(var i=0;i<first;i++) h+='<div class="cal-day phantom"></div>';
+  for(var d=1;d<=dcnt;d++){
+    var ds=st.calYear+'-'+ms+'-'+p2(d);
+    var dd=new Date(st.calYear,st.calMonth-1,d);
+    var dow=(first+d-1)%7;
+    var bookable=isBookableDay(dd);
+    var avail=bookable&&st.availDates&&st.availDates.has(ds), isSel=ds===st.date;
+    var cls='cal-day';
+    if(isSel) cls+=' sel';
+    else if(avail){ cls+=' avail'; if(dow===0)cls+=' sun'; else if(dow===6)cls+=' sat'; }
+    if(dd.getTime()===TODAY.getTime())cls+=' today';
+    var click=(avail)?' onclick="pickD(\''+ds+'\')"':'';
+    h+='<div class="'+cls+'"'+click+'>'+d+'</div>';
+  }
+  h+='</div>';
+  h+='<div class="c-note" style="font-size:12px;color:#6b7280;margin-top:8px">※ご予約は3日後以降の日程から承っております。お急ぎの場合はLINEのトークでご相談ください。</div>';
+  if(st.adErr){
+    h+='<div class="msg-err">空き情報を取得できませんでした。電波の良い場所で、もう一度お試しください。<div style="margin-top:10px"><button class="btn-retry" onclick="retryAD()">再試行</button></div></div>';
+  }else if(st.availDates===null){
+    h+='<div class="ld-box"><span class="spinner"></span>空き情報を取得中…</div>';
+    setTimeout(loadAD,0);
+  }else if(st.availDates.size===0){
+    h+='<div class="cal-info">今月は空き枠がありません。'+(canNext?'翌月をご確認ください。':'別の条件をご確認ください。')+'</div>';
+  }
+  h+=renderTimeChoices();
+  document.getElementById('sc').innerHTML=h;
+  document.getElementById('sn').innerHTML='<button class="btn btn-bk" style="flex:1" onclick="go(1)">コースへ戻る</button>';
+}
+function calMv(dir){
+  st.calMonth+=dir;
+  if(st.calMonth>12){st.calMonth=1;st.calYear++;}
+  if(st.calMonth<1){st.calMonth=12;st.calYear--;}
+  st.date=null; st.time=null; st.slots=null; st.slErr=false; slotVersion++;
+  st.availDates=null; st.adErr=false; s3();
+}
+
+// 表示中の月で「候補日」を集め、各日の busy_ranges から1枠でも空けば available_dates に入れる。
+// busy_ranges は月の全予約をまとめて1回取得し、クライアントで日別に振り分ける（高速・PII非取得）。
+function loadAD(){
+  var reqN=st.nurseId, reqM=st.menuId, reqY=st.calYear, reqMo=st.calMonth;
+  // 月内の候補日リスト
+  var dcnt=new Date(reqY,reqMo,0).getDate();
+  var cand=[];
+  for(var d=1;d<=dcnt;d++){ var dd=new Date(reqY,reqMo-1,d); if(isBookableDay(dd)) cand.push(ymd(dd)); }
+  if(!cand.length){
+    if(String(st.nurseId)===String(reqN)&&String(st.menuId)===String(reqM)&&st.calYear===reqY&&st.calMonth===reqMo){
+      st.availDates=new Set(); st.adErr=false; if(st.step===2)s3();
+    }
+    return;
+  }
+  // 月初〜月末の予約を一括取得（JST境界）。
+  var pFrom=reqY+'-'+p2(reqMo)+'-01T00:00:00+09:00';
+  var endD=new Date(reqY,reqMo,1); // 翌月1日
+  var pTo=endD.getFullYear()+'-'+p2(endD.getMonth()+1)+'-01T00:00:00+09:00';
+  sbRpc('busy_ranges',{ p_artist:reqN, p_from:pFrom, p_to:pTo, p_store:STORE_ID }).then(function(r){
+    var same=(String(st.nurseId)===String(reqN)&&String(st.menuId)===String(reqM)&&st.calYear===reqY&&st.calMonth===reqMo);
+    if(!r.ok){ if(same){ st.adErr=true; if(st.step===2)s3(); } return; }
+    var busyByDay={};
+    (r.data||[]).forEach(function(x){
+      var s=new Date(x.start_at).getTime(), e=new Date(x.end_at).getTime();
+      // 予約をその開始日（JST）に振り分け
+      var key=jstDateKey(x.start_at);
+      (busyByDay[key]=busyByDay[key]||[]).push([s,e]);
+    });
+    var set=new Set();
+    cand.forEach(function(ds){
+      var slots=computeSlots(ds, busyByDay[ds]||[]);
+      if(slots.some(function(s){return s.available;})) set.add(ds);
+    });
+    if(same){ st.availDates=set; st.adErr=false; if(st.step===2)s3(); }
+  }).catch(function(){
+    if(String(st.nurseId)===String(reqN)&&String(st.menuId)===String(reqM)&&st.calYear===reqY&&st.calMonth===reqMo){
+      st.adErr=true; if(st.step===2)s3();
+    }
+  });
+}
+// ISO日時(+09:00やZ)を JSTの 'YYYY-MM-DD' に変換（日別振り分け用）。
+function jstDateKey(iso){
+  var d=new Date(iso);
+  var j=new Date(d.getTime()+9*3600000);
+  return j.getUTCFullYear()+'-'+p2(j.getUTCMonth()+1)+'-'+p2(j.getUTCDate());
+}
+// 「再試行」ボタン：エラー状態を解除して空き情報を取り直す。
+function retryAD(){ st.adErr=false; st.availDates=null; s3(); }
+function pickD(ds){
+  if(!st.availDates||!st.availDates.has(ds))return;
+  st.date=ds; st.time=null; st.slots=null; st.slErr=false; slotVersion++;
+  s3();
+  document.getElementById('inlineTimes').scrollIntoView({block:'nearest'});
+}
+
+// ===== 空き枠計算（GAS版 loadSlots と同じ考え方） =====
+// 店舗営業時間内を interval 刻みで作り、施術時間ぶん収まり、busy（予約済み）と重ならない枠だけ available=true。
+function computeSlots(dateStr, busy){
+  var openMin=storeOpenMin(), closeMin=storeCloseMin(), interval=storeInterval();
+  var dur=(st.menuDur&&st.menuDur>0)?st.menuDur:60;
+  var now=Date.now();
+  var out=[];
+  for(var mins=openMin; mins+dur<=closeMin; mins+=interval){
+    var hh=p2(Math.floor(mins/60)), mm=p2(mins%60), t=hh+':'+mm;
+    var s=new Date(dateStr+'T'+t+':00+09:00').getTime(), e=s+dur*60000;
+    var future=s>now; // 過去時刻は出さない（当日用）
+    var free=future && busy.every(function(b){ return e<=b[0] || s>=b[1]; });
+    out.push({ time:t, available:free });
+  }
+  return out;
+}
+
+// ===== 同じ画面で時間選択 =====
+var slotVersion=0;
+var pendingSlots=new Set();
+function renderTimeChoices(){
+  var h='<section id="inlineTimes" style="margin-top:20px;border-top:1px solid var(--line);padding-top:18px">';
+  if(!st.date)return h+'<div class="cal-info">日付を選ぶと、空いている時間が表示されます。</div></section>';
+  var pts=st.date.split('-'), dd=new Date(+pts[0],+pts[1]-1,+pts[2]);
+  var dl=+pts[1]+'月'+parseInt(pts[2])+'日（'+DOW[dd.getDay()]+'）';
+  h+='<div class="dt-lbl">'+esc(dl)+'の空き時間</div>';
+  if(st.slErr){
+    h+='<div class="msg-err">空き枠を取得できませんでした。電波の良い場所で、もう一度お試しください。<div style="margin-top:10px"><button class="btn-retry" onclick="retrySl()">再試行</button></div></div>';
+  }else if(st.slots===null){
+    h+='<div class="ld-box"><span class="spinner"></span>空き枠を取得中…</div>';
+    setTimeout(loadSl,0);
+  }else{
+    var anyA=st.slots.some(function(s){return s.available;});
+    if(!anyA){
+      h+='<div class="msg-err">この日は空き枠がありません。上のカレンダーで別の日をお選びください。</div>';
+    }else{
+      h+='<div class="slot-grid">';
+      st.slots.forEach(function(s){
+        if(s.available){
+          var sel=s.time===st.time?' sel':'';
+          h+='<button type="button" class="slot-a'+sel+'" data-slot-time="'+esc(s.time)+'">'+esc(s.time)+'</button>';
+        }
+      });
+      h+='</div><p class="s-sub" style="margin-top:10px">時間を選ぶと、お客様情報の入力へ進みます。</p>';
+    }
+  }
+  return h+'</section>';
+}
+function loadSl(){
+  if(!st.date||st.step!==2)return;
+  // セッション内キャッシュを優先。
+  var ck=st.nurseId+'|'+st.menuId+'|'+st.date;
+  if(st.slCache[ck]){ st.slots=st.slCache[ck]; st.slErr=false; s3(); return; }
+  var version=slotVersion, requestKey=version+'|'+ck;
+  if(pendingSlots.has(requestKey))return;
+  pendingSlots.add(requestKey);
+  var reqN=st.nurseId, reqMn=st.menuId, reqD=st.date;
+  var pFrom=reqD+'T00:00:00+09:00', pTo=reqD+'T23:59:59+09:00';
+  sbRpc('busy_ranges',{ p_artist:reqN, p_from:pFrom, p_to:pTo, p_store:STORE_ID }).then(function(r){
+    var same=(slotVersion===version&&String(st.nurseId)===String(reqN)&&String(st.menuId)===String(reqMn)&&String(st.date)===String(reqD));
+    if(!same)return;
+    if(!r.ok){ st.slErr=true; if(st.step===2)s3(); return; }
+    var busy=(r.data||[]).map(function(x){ return [new Date(x.start_at).getTime(), new Date(x.end_at).getTime()]; });
+    var arr=computeSlots(reqD, busy);
+    st.slCache[reqN+'|'+reqMn+'|'+reqD]=arr;
+    st.slots=arr; st.slErr=false; if(st.step===2)s3();
+  }).catch(function(){
+    if(slotVersion===version&&String(st.nurseId)===String(reqN)&&String(st.menuId)===String(reqMn)&&String(st.date)===String(reqD)){
+      st.slErr=true; if(st.step===2)s3();
+    }
+  }).finally(function(){pendingSlots.delete(requestKey);});
+}
+// 「再試行」ボタン：エラー状態を解除して空き枠を取り直す。
+function retrySl(){
+  if(!st.date)return;
+  delete st.slCache[st.nurseId+'|'+st.menuId+'|'+st.date];
+  st.slErr=false; st.slots=null; slotVersion++; s3();
+}
+function pickT(t){
+  if(st.step!==2||!st.slots||!st.slots.some(function(s){return s.available&&s.time===t;}))return;
+  st.time=t; go(4);
+}
+document.addEventListener('click',function(e){
+  var button=e.target.closest('button[data-slot-time]');
+  if(button)pickT(button.getAttribute('data-slot-time'));
+});
+
+// ===== STEP 5: お客様情報 =====
+function s5(){
+  var h='<div class="s-title">お客様情報を入力してください</div>';
+  h+='<div class="field"><label class="fl">フリガナ<span class="req">*</span></label>';
+  h+='<input type="text" id="fk" value="'+esc(st.furigana)+'" placeholder="ヤマダ　ハナコ" autocomplete="off" oninput="st.furigana=this.value;v5()"></div>';
+  h+='<div class="field"><label class="fl">お名前<span class="req">*</span></label>';
+  h+='<input type="text" id="fn" value="'+esc(st.custName)+'" placeholder="山田　花子" autocomplete="off" oninput="st.custName=this.value;v5()"></div>';
+  h+='<div class="field"><label class="fl">電話番号<span class="req">*</span></label>';
+  h+='<input type="tel" id="fp" value="'+esc(st.phone)+'" placeholder="09012345678" autocomplete="off" oninput="st.phone=this.value;v5()">';
+  h+='<div class="ferr" id="f-perr">正しい電話番号を入力してください（例：09012345678）</div></div>';
+  // ★クーポン使用の有無UIは patch-48 で廃止：メニュー名（「モニター」を含むか）で価格区分を判定する運用に統一。
+  h+='<div class="field"><label class="fl">アートメイクの施術経験<span class="req">*</span></label><div class="radios">';
+  h+='<label><input type="radio" name="ae" value="yes"'+(st.artExp==='yes'?' checked':'')+' onchange="st.artExp=this.value;v5()"><span>有</span></label>';
+  h+='<label><input type="radio" name="ae" value="no"'+(st.artExp==='no'?' checked':'')+' onchange="st.artExp=this.value;v5()"><span>無</span></label>';
+  h+='</div></div>';
+  h+='<div class="field"><label class="fl">メモ欄</label>';
+  h+='<textarea id="fm" rows="3" placeholder="ご要望などがあればご記入ください（任意）" autocomplete="off" oninput="st.memo=this.value">'+esc(st.memo)+'</textarea></div>';
+  document.getElementById('sc').innerHTML=h;
+  document.getElementById('sn').innerHTML='<button class="btn btn-bk" onclick="go(3)">戻る</button><button class="btn btn-p" id="b5" onclick="v5()&&go(5)" disabled>次へ</button>';
+  v5();
+}
+function v5(){
+  var ph=st.phone.replace(/[-\s]/g,''), ok=okPhone(ph);
+  var err=document.getElementById('f-perr'); if(err)err.style.display=(st.phone&&!ok)?'block':'none';
+  var valid=st.furigana.trim()&&st.custName.trim()&&ok&&st.artExp;
+  var b=document.getElementById('b5'); if(b)b.disabled=!valid;
+  return !!valid;
+}
+
+// ===== STEP 6: 確認・同意・送信 =====
+var CL={'yes':'有','no':'無','2set':'2回セット','50off':'50%OFFクーポン','none':'無'};
+function s6(){
+  var pts=st.date.split('-'), dd=new Date(+pts[0],+pts[1]-1,+pts[2]);
+  var dtl=+pts[1]+'月'+parseInt(pts[2])+'日（'+DOW[dd.getDay()]+'）　'+st.time;
+  var h='<div class="s-title">予約内容を確認してください</div>';
+  h+='<div class="sum-box">';
+  h+=sr('アーティスト',esc(st.nurseName));
+  h+=sr('コース',esc(st.menuName));
+  h+=sr('日時',esc(dtl));
+  // ★patch-48：モニター価格が設定されているなら、お客様がここで「ご予約形態」を選ぶ。
+  //   monitor_price < normal_price のときのみ選択肢を出す（同額・未設定なら通常価格で確定）。
+  var hasMon=(st.menuPriceMonitor>0 && st.menuPriceMonitor<st.menuPrice);
+  if(hasMon){
+    var sel=st.monitorChoice;  // null/'yes'/'no'
+    var rad='<div class="radios-v">'
+      +'<label><input type="radio" name="mc" value="yes"'+(sel==='yes'?' checked':'')+' onchange="st.monitorChoice=this.value;s6();"><span>モニターあり ¥'+st.menuPriceMonitor.toLocaleString()+'（症例写真の撮影に協力）</span></label>'
+      +'<label><input type="radio" name="mc" value="no"'+(sel==='no'?' checked':'')+' onchange="st.monitorChoice=this.value;s6();"><span>通常 ¥'+st.menuPrice.toLocaleString()+'</span></label>'
+      +'</div>';
+    h+=sr('ご予約形態<span class="req">*</span>',rad);
+    // 選択済みなら確定した料金を表示、未選択なら案内文。
+    if(sel==='yes')      h+=sr('料金','¥'+st.menuPriceMonitor.toLocaleString()+'（税込）');
+    else if(sel==='no')  h+=sr('料金','¥'+st.menuPrice.toLocaleString()+'（税込）');
+    else                 h+=sr('料金','<span style="color:#c2410c">↑ご予約形態をお選びください</span>');
+  } else {
+    // モニター価格未設定 or 同額 → 通常価格1本で確定。
+    if(st.menuPrice&&parseInt(st.menuPrice)>0) h+=sr('料金','¥'+parseInt(st.menuPrice).toLocaleString()+'（税込）');
+  }
+  h+=sr('お名前',esc(st.custName)+'（'+esc(st.furigana)+'）');
+  h+=sr('電話番号',esc(st.phone));
+  h+='</div>';
+  if(st.artExp==='yes') h+=FIXNOTE; // アートメイク経験「有」＝他院修正の案内を確認画面で目立たせる
+  h+='<div class="sec-lbl">ご利用規約</div>';
+  h+='<div class="terms-box">'+TERMS+'</div>';
+  h+='<div class="agree-row"><input type="checkbox" id="agc"'+(st.agreed?' checked':'')+' onchange="st.agreed=this.checked;updSub()"><span>上記の利用規約・注意事項・キャンセルポリシーをすべて確認しました。</span></div>';
+  h+='<div id="serr" style="margin-top:12px"></div>';
+  document.getElementById('sc').innerHTML=h;
+  document.getElementById('sn').innerHTML='<button class="btn btn-bk" onclick="go(4)">戻る</button><button class="btn btn-p" id="bsub" onclick="doSub()" '+(canSub()?'':'disabled')+'>この内容で予約する</button>';
+}
+function sr(k,v){ return '<div class="s-row"><div class="s-key">'+k+'</div><div class="s-val">'+v+'</div></div>'; }
+// ★予約ボタンの有効化＝同意 ＋（モニター選択可なら選択済み）。patch-48でモニター選択を必須条件に追加。
+function canSub(){
+  if (!st.agreed) return false;
+  var hasMon=(st.menuPriceMonitor>0 && st.menuPriceMonitor<st.menuPrice);
+  if (hasMon && !st.monitorChoice) return false;
+  return true;
+}
+function updSub(){ var b=document.getElementById('bsub'); if(b)b.disabled=!canSub(); }
+function hasLineUid(uid){ return String(uid == null ? "" : uid).trim() !== ""; }
+// ★2026-10-03：止まったときの文は専門用語なし。正本は poc/_pure.mjs（tests が写しとの一致を確かめる）。
+var LINE_UID_REQUIRED_MESSAGE = 'うまく開けませんでした。下の「予約ページを開き直す」ボタンを押してください。それでも進めない場合は、LINEのトークにご希望の日時を送っていただければ、スタッフがお取りします。';
+var LINE_UID_REQUIRED_MESSAGE_NO_BUTTON = 'うまく開けませんでした。お手数ですが、LINEのトークにご希望の日時を送っていただければ、スタッフがお取りします。';
+// ===== LINE の普通のブラウザで開かれたら、LINE 専用の入口（LIFF）へ自動で開き直す（2026-10-03） =====
+//   ステップ配信などの外向けURL（…/new.html?store=…）を LINE のトークから開くと、LIFF ではない普通のブラウザで開き、
+//   LINE UID が取れずに最後の「予約する」で必ず止まっていた（小倉 10/3 のお客様「何回しても同じ」）。
+//   すでに送ったメッセージのリンクも救うため、ページ側で LIFF へ開き直す。印(lr=1)付きで戻ってきたら繰り返さない。
+var LIFF_REOPEN_MARK = 'lr';
+function isLineInAppBrowser(ua){ return /\bLine\/\d/i.test(String(ua == null ? '' : ua)); }
+function reopenParams(search){
+  var sp; try{ sp=new URLSearchParams(String(search == null ? '' : search)); }catch(e){ sp=new URLSearchParams(); }
+  var out=new URLSearchParams();
+  function take(p){ p.forEach(function(v,k){ if(k.indexOf('liff.')===0 || k===LIFF_REOPEN_MARK) return; if(!out.has(k)) out.set(k,v); }); }
+  take(sp);
+  var inner=sp.get('liff.state');
+  if(inner){ try{ take(new URLSearchParams(inner.charAt(0)==='?' ? inner.slice(1) : inner)); }catch(e){} }
+  return out;
+}
+function hasLiffReopenMark(search){
+  var sp; try{ sp=new URLSearchParams(String(search == null ? '' : search)); }catch(e){ return false; }
+  if(sp.get(LIFF_REOPEN_MARK)==='1') return true;
+  var inner=sp.get('liff.state'); if(!inner) return false;
+  try{ return new URLSearchParams(inner.charAt(0)==='?' ? inner.slice(1) : inner).get(LIFF_REOPEN_MARK)==='1'; }catch(e){ return false; }
+}
+function buildLiffReopenUrl(liffId, search){
+  var id=String(liffId == null ? '' : liffId).trim();
+  if(!/^[0-9A-Za-z_-]{1,64}$/.test(id)) return '';
+  var p=reopenParams(search); p.set(LIFF_REOPEN_MARK,'1');
+  return 'https://liff.line.me/'+id+'?'+p.toString();
+}
+function shouldReopenInLiff(o){
+  o=o||{};
+  if(o.loggedIn || o.inClient) return false;
+  if(!isLineInAppBrowser(o.ua)) return false;
+  if(!buildLiffReopenUrl(o.liffId,'')) return false;
+  if(hasLiffReopenMark(o.search)) return false;
+  return true;
+}
+// 止まったときの案内：文＋「予約ページを開き直す」ボタン（DOM で組む＝HTML を文字列で作らない）。
+function showLineUidRequired(){
+  var e1=document.getElementById('serr'); if(!e1) return;
+  var url=buildLiffReopenUrl(LIFF_ID, location.search);
+  e1.className='msg-err';
+  e1.textContent=url ? LINE_UID_REQUIRED_MESSAGE : LINE_UID_REQUIRED_MESSAGE_NO_BUTTON;
+  if(url){
+    var wrap=document.createElement('div'); wrap.style.marginTop='10px';
+    var a=document.createElement('a'); a.href=url; a.className='btn-retry'; a.textContent='予約ページを開き直す';
+    a.style.display='inline-block'; a.style.textDecoration='none';
+    wrap.appendChild(a); e1.appendChild(wrap);
+  }
+}
+function doSub(){
+  if(!canSub())return;  // ★同意＋（モニター選択可なら選択済み）の両方が揃わないと送らない（patch-48）
+  // ★日付・時間が未選択なら送信しない（満席で枠を捨てた後などに null:00 で送るのを防止）。時間選択へ戻す。
+  if(!st.date || !st.time){
+    var e0=document.getElementById('serr'); if(e0){e0.className='msg-err';e0.textContent='日付と時間をもう一度お選びください。';}
+    go(3); return;
+  }
+  // 媒体別LIFFリンク運用の保険：LINE UID が取れない予約は本人紐付けが弱くなるため作らない。
+  if(!hasLineUid(st.uid)){
+    showLineUidRequired();
+    return;
+  }
+  var btn=document.getElementById('bsub');
+  if(btn){btn.disabled=true;btn.textContent='送信中…';}
+  // 予約確定は create_public_reservation RPC に集約（店舗・担当・メニューの正当性／席数／重複をDB側で検証）。
+  var startISO=st.date+'T'+st.time+':00+09:00';
+  var treatmentType=isRetouchMenu(st.menuName)?'retouch':'new';
+  // ★reservation_type は STEP6 でお客様が選んだ「モニター有無」で決定（patch-48 改）。
+  //   モニター選択肢が無い（monitor_price 未設定 or 同額）メニューは normal 固定。
+  //   DB側 create_public_reservation がこの値で price_monitor/price_normal を切替記録する。
+  var hasMon=(st.menuPriceMonitor>0 && st.menuPriceMonitor<st.menuPrice);
+  var reservationType=(hasMon && st.monitorChoice==='yes')?'monitor':'normal';
+  // メモにクーポン種別・施術経験も残す（GAS版の補足情報を引き継ぐ）。
+  var memo=buildMemo();
+  sbRpc('create_public_reservation',{
+    p_store: STORE_ID,
+    p_artist: st.nurseId,
+    p_menu: st.menuId,
+    p_customer_name: st.custName,
+    p_start: startISO,
+    p_treatment_type: treatmentType,
+    p_reservation_type: reservationType,
+    p_line_uid: (st.uid || null),
+    p_phone: st.phone,
+    p_furigana: st.furigana,
+    p_memo: memo,
+    p_ref: (REF || null),
+    // ★クーポンUIは patch-48 で廃止。DB側の create_public_reservation シグネチャを壊さないため
+    //   p_coupon は固定 'none' を送る（旧予約データは値が残る・ラベル辞書は notify-reservation で後方互換維持）。
+    p_coupon: 'none',
+    p_art_experience: (st.artExp || ''),
+    // ★#94 冪等キー：この送信（二度押し・通信リトライ含む）の間は同じキー。DBが同一キーの2件目を作らず既存予約IDを返す。
+    //   ★冪等はDB側で line_uid 確定（LINEログイン済み）のリクエストにのみ有効。未ログイン(uid 無し)では
+    //     キーを送らず null にする＝DBの挙動と揃える（未ログインのキーはDBで無視されるため送っても無意味）。
+    p_idempotency_key: (st.uid ? getIdemKey() : null)
+  }).then(function(r){
+    if(r.ok){
+      // 通知はDBトリガ→notify-reservation が内部トークンで実行（クライアントからは送らない＝なりすまし/改ざん対策）。
+      // ★予約成立。次にもし別予約をするなら別キーにするため、ここで冪等キーを破棄する。
+      newIdemKey();
+      showScr('s-done');
+      // ★LINEの中で開いた時だけ自動でトークへ戻す。ブラウザでは戻り先が無いので、戻るボタンも隠す。
+      if(inLineClient()){ setTimeout(backToTalk,1200); }
+      else { var _bb=document.getElementById('backBtn'); if(_bb) _bb.style.display='none'; }
+      return;
+    }
+    var code=(r.data&&r.data.code)||'', msg=(r.data&&r.data.message)||'';
+    // 重複（排他制約 23P01）・満席（seat_full）→「埋まりました」案内＋枠再読込。
+    if(String(r.status)==='409' || code==='23P01' || msg==='seat_full' || /no_overlap|overlap|exclusion/i.test(msg)){
+      subFail(btn,'その時間帯はちょうど埋まりました。お手数ですが、別の時間をお選びください。');
+      // この枠は埋まったので、その日の空き枠と当月の空き日を捨て、時間選択画面へ戻して最新を取り直す。
+      // ★時間を選び直す＝予約内容が変わるので冪等キーも破棄（次の送信は別予約として別キーにする）。
+      newIdemKey();
+      delete st.slCache[st.nurseId+'|'+st.menuId+'|'+st.date];
+      st.slots=null; st.availDates=null; st.time=null;
+      slotVersion++;
+      setTimeout(function(){ go(3); }, 1500);   // ★時間選択へ戻して再取得（null時間での再送を防ぐ）
+    }else{
+      subFail(btn, errR(code,msg));
+    }
+  }).catch(function(err){
+    subFail(btn,'送信に失敗しました。電波の良い場所で再度お試しください。');
+  });
+}
+function buildMemo(){
+  // クーポン・施術経験は予約レコードの専用列(coupon/art_experience)に保存するため、ここはお客様メモのみ。
+  return (st.memo && st.memo.trim()) ? st.memo.trim() : '';
+}
+function subFail(btn,msg){
+  if(btn){btn.disabled=false;btn.textContent='この内容で予約する';}
+  var e=document.getElementById('serr'); if(e){e.className='msg-err';e.textContent=msg;}
+}
+// create_public_reservation が raise した例外コード／メッセージをお客様向け文言に変換。
+function errR(code,msg){
+  msg=String(msg||'');
+  if(/store_not_found|menu_not_in_tenant|artist_not_in_store|artist_menu_not_allowed/.test(msg))
+    return 'ただいまこの組み合わせのご予約をお受けできません。お手数ですがトーク画面からお問い合わせください。';
+  if(/seat_full/.test(msg))
+    return '申し訳ございません。その時間帯は満席です。お手数ですが、別の日時でお試しください。';
+  return '申し訳ございません、ただいまご予約をお受けできませんでした。お手数ですがトーク画面からご連絡ください。';
+}
+// （旧 fireNotify は廃止）予約通知は DBトリガ → notify-reservation が内部トークンで実行する。
+// クライアントから公開キーで通知関数を叩く方式は、なりすまし/改ざん/スパムの温床のため撤去した。
+// LIFFウィンドウを閉じてLINEのトークへ戻す。LINEアプリ外（通常ブラウザ）では何も起きない。
+// LINEアプリの中で開いているか（LIFF in-client）。ブラウザでは false。
+function inLineClient(){
+  try{ return (typeof liff!=='undefined' && liff.isInClient && liff.isInClient()); }catch(e){ return false; }
+}
+function backToTalk(){
+  // ★LINEの中で開いた時だけ closeWindow でトークへ戻す。
+  //   ブラウザ（LINE外）では戻り先が無いので何もしない＝「外部アプリを開きますか」ポップアップを出さない。
+  if(inLineClient()){ try{ liff.closeWindow(); }catch(e){} }
+}
+
+// ===== 利用規約 =====
+var TERMS='<p>ご予約の前に、以下の項目について必ずご確認いただき、該当する場合はご予約前にご連絡ください。</p>'
+  +'<span class="t-hd">施術をお受けできない方：</span><ul>'
+  +'<li>妊娠中、または妊娠の可能性がある方／授乳中の方</li>'
+  +'<li>重度の金属アレルギーをお持ちの方</li>'
+  +'<li>ケロイド体質の方</li>'
+  +'<li>重度の皮膚疾患（アトピー性皮膚炎の活発期など含む）</li>'
+  +'<li>心臓病、重度の糖尿病、免疫不全状態</li>'
+  +'<li>全身性の感染症（B型・C型肝炎、HIV 等）</li>'
+  +'<li>局所麻酔薬に対するアレルギーの既往</li>'
+  +'<li>施術部位に大きな傷、炎症、ヘルペス・ニキビ等がある方</li>'
+  +'<li>施術部位に直近で美容施術のダウンタイムがある方（レーザー/ピーリング/ボトックス等）</li>'
+  +'<li>重大な血液凝固障害や抗凝固剤・ステロイド内服中の方</li>'
+  +'</ul>'
+  +'<span class="t-hd">ご予約前にご連絡が必要な場合：</span><ul>'
+  +'<li>発熱、風邪・感染症に罹患している状態</li>'
+  +'<li>施術部位の軽度な炎症や痒み・皮膚トラブルがある</li>'
+  +'<li>激しい運動やサウナ、長時間の入浴を直前に行った</li>'
+  +'<li>施術日直前に飲酒した</li>'
+  +'<li>当日に体調不良を感じる場合</li>'
+  +'</ul>'
+  +'<p>※上記は施術の安全性・定着率に影響する可能性があります。</p>'
+  +'<span class="t-hd">【モニター予約について】</span><ul>'
+  +'<li>モニター価格のメニューでご予約のお客様はBefore/Afterの症例写真を撮影させていただきます。</li>'
+  +'<li>症例写真はSNS等で使用する場合がございます。</li>'
+  +'<li>InstagramストーリーまたはGoogle口コミ投稿のいずれかが必須条件となっております。</li>'
+  +'</ul>'
+  +'<span class="t-hd">【キャンセルポリシー】</span>'
+  +'<span class="t-sub">1. キャンセル・日時変更の方法</span>'
+  +'<p>こちらの公式LINEにてご連絡ください。ご予約日から3日前まで料金は発生しません。</p>'
+  +'<span class="t-sub">2. キャンセル料（クレジット・現地決済）</span><ul>'
+  +'<li>3日前〜前日：お支払い金額の50%を返金</li>'
+  +'<li>当日のキャンセル・日時変更：返金なし</li>'
+  +'<li>ご連絡なしキャンセル：返金なし</li>'
+  +'<li>当院都合のキャンセル：全額返金</li>'
+  +'</ul>'
+  +'<span class="t-sub">3. キャンセル料（現地決済のみ）</span><ul>'
+  +'<li>3日前〜前日：お支払い金額の50%をご請求</li>'
+  +'<li>当日：施術料金の100%をご請求</li>'
+  +'<li>当日15分以上の遅刻：無断キャンセル扱いで施術料金の100%をご請求</li>'
+  +'</ul>'
+  +'<span class="t-hd">他院修正の注意点</span>'
+  +'<p>他院でアートメイクを受けた方は以下のリスクをご了承ください。</p><ul>'
+  +'<li>ストロークの間から既存の色が見える場合があります。</li>'
+  +'<li>大幅なデザイン変更ははみ出す場合があります。</li>'
+  +'<li>皮膚の状態によっては色が入りにくく抜けやすい可能性があります。</li>'
+  +'<li>インクが拡散しやすく、毛並み感が出づらい可能性があります。</li>'
+  +'<li>濃く残っている場合は担当者の判断で見送る可能性があります。</li>'
+  +'</ul>';
+
+// 確認画面で、アートメイク経験「有」のお客様にだけ出す注意ボックス（他院修正になる旨）。
+var FIXNOTE='<div class="fix-note">'
+  +'<div class="fix-note-hd">⚠️ 今回の施術は「他院修正」になります</div>'
+  +'<p>他院でアートメイクを受けたことがある方は、今回の施術が「他院修正」となります。仕上がりに次のような影響が出る場合がありますので、ご了承のうえご予約ください。</p>'
+  +'<ul>'
+  +'<li>ストロークの間から既存の色が見える場合があります。</li>'
+  +'<li>大幅なデザイン変更ははみ出す場合があります。</li>'
+  +'<li>皮膚の状態によっては色が入りにくく抜けやすい可能性があります。</li>'
+  +'<li>インクが拡散しやすく、毛並み感が出づらい可能性があります。</li>'
+  +'<li>濃く残っている場合は担当者の判断で見送る可能性があります。</li>'
+  +'</ul></div>';
+
+// ===== 起動 =====
+// 担当・メニュー・店舗営業時間の取得（Supabase）と LIFF初期化を「並行」で走らせる。
+var bootOpt=null, bootOptDone=false, bootProfDone=false, wizardShown=false;
+
+function updHeader(){
+  var el=document.getElementById('hSub');
+  if(el&&bootOpt) el.textContent=(bootOpt.store_name||STORE)+(st.displayName?'　'+st.displayName+' 様':'');
+}
+function showWizardIfReady(){
+  if(wizardShown) return;
+  // 同意書は準備中画面。キャンセルは画面を出し、UID確定後(profileDone)に loadCancelList で一覧取得。
+  if(MODE==='inquiry'){ wizardShown=true; showScr('s-inquiry'); return; } // JISSO AI
+  if(MODE==='consent'){ wizardShown=true; showScr('s-consent'); return; }
+  if(MODE==='cancel'){  wizardShown=true; showScr('s-cancel');  return; }
+  if(MODE==='questionnaire'){ wizardShown=true; showScr('s-questionnaire'); return; }
+  // 予約モードはオプション（メニュー・担当）が必須。
+  if(!bootOptDone) return;
+  if(!bootOpt){
+    wizardShown=true;
+    document.getElementById('s-loading').innerHTML='<div class="msg-err" style="margin:40px 24px">情報の取得に失敗しました。<br>時間をおいて再度お試しください。</div>';
+    return;
+  }
+  st.options=bootOpt; applyInitialArtist(); wizardShown=true; updHeader(); showScr('s-wizard'); render();
+}
+function profileDone(){ bootProfDone=true; updHeader(); showWizardIfReady();
+  if(MODE==='cancel') loadCancelList();   // ★LINE UID 確定後に「自分の予約一覧」を取得
+  if(MODE==='consent') loadConsentForm(); // ★LINE UID 確定後に同意書フォームを描画（氏名・UIDを使う）
+  if(MODE==='questionnaire') qLoad();     // ★LINE UID 確定後に事前問診フォームを描画
+  if(MODE==='inquiry') inqLoad();         // JISSO AI：LINE UID 確定後に問い合わせフォームを描画
+  recordRefIfAny();                       // ★patch-51：?ref= 付きLIFFで来た人の流入元を初回1回だけ記録
+}
+
+// ===== patch-51：友達追加ベース流入分析のための「初回 ref 記録」 =====
+//   ?ref=タグ 付きでLIFFが開かれ、LINEログインで line_uid が取れた瞬間に、
+//   record_customer_ref RPC を 1回だけ叩いて customers.ref を初回セットする。
+//   ・予約しなくても流入元が記録される（友達追加ベース集計の土台）。
+//   ・customers.ref が既に入っている人は サーバ側で上書きしない（初回起点で固定）。
+//   ・通信失敗・テナント不在等は黙って無視（fire-and-forget＝ユーザー体験を壊さない）。
+//   ・同一ページ遷移内での二重呼び出しは refRecorded フラグで抑止（無駄通信を1回に抑える）。
+var refRecorded = false;
+function recordRefIfAny(){
+  if(refRecorded) return;
+  if(!REF || !st.uid || !TENANT_ID) return;
+  refRecorded = true;
+  try{
+    sbRpc('record_customer_ref', { p_tenant: TENANT_ID, p_line_uid: st.uid, p_ref: REF })
+      .catch(function(){ /* fire-and-forget */ });
+  }catch(e){ /* noop */ }
+}
+
+// ===== 流入リンク：LINE の中で本人と流入元を記録してから、友だち追加へ（mode=join・2026-10-05） =====
+//   順番を固定：記録（最大5秒待つ）→ 友だちかどうか → 友だち追加画面（または「登録済み」）。
+//   記録がサーバーに入ってから友だちになるので、帰属の判定（follow より前の履歴）が成り立つ。
+//   どこで失敗しても友だち追加画面へ進む。LINE の外で開かれたらログイン画面は出さず lin.ee へ。
+function runJoin(){
+  var cfg=getJoinConfig(getQueryParam('store'));
+  var ref=sanitizeJoinTag(getQueryParam('ref'));
+  var done=false;
+  function finish(url){
+    if(done) return; done=true;
+    try{ clearTimeout(window.__JOIN_FALLBACK); }catch(e){}
+    if(url) location.replace(url);
+  }
+  function toAddFriend(){ finish(buildAddFriendInLineUrl(cfg) || (cfg && cfg.addFriendUrl) || ''); }
+  function showThanks(){
+    finish('');
+    var box=joinBox(); if(!box) return;
+    box.appendChild(joinEl('h1','ご登録ありがとうございます'));
+    box.appendChild(joinEl('p',(cfg && cfg.storeName ? cfg.storeName + 'の公式LINEに' : '') + 'すでに友だち追加いただいています。ご予約やご質問はトークからどうぞ。'));
+    var t=buildTalkUrl(cfg); if(t) box.appendChild(joinLinkBtn(t,'トークを開く',true));
+  }
+  if(!cfg || !cfg.joinLiffId || typeof liff==='undefined'){ toAddFriend(); return; }
+  try{
+    liff.init({ liffId: cfg.joinLiffId }).then(function(){
+      if(!liff.isInClient()){ finish(cfg.addFriendUrl); return; }
+      var tok=''; try{ tok=liff.getIDToken()||''; }catch(e){}
+      var send = (tok && ref) ? Promise.race([
+        fetch(EDGE_LIFF, { method:'POST', headers:Object.assign({ "Content-Type":"application/json" }, H),
+          body: JSON.stringify({ action:'record_join', id_token: tok, store: cfg.slug, ref: ref }) }),
+        new Promise(function(res){ setTimeout(res, 5000); })
+      ]) : Promise.resolve(null);
+      return send.then(function(){}, function(){}).then(function(){ return liff.getFriendship(); })
+        .then(function(f){ if(decideJoinNext(f && f.friendFlag)==='talk') showThanks(); else toAddFriend(); });
+    }).catch(function(){ toAddFriend(); });
+  }catch(e){ toAddFriend(); }
+}
+
+// ===== お客様によるキャンセル（公開キャンセルRPC my_reservations / cancel_my_reservation）=====
+function clDtText(iso){
+  var d=new Date(iso); if(isNaN(d.getTime())) return '';
+  var w=['日','月','火','水','木','金','土'][d.getDay()];
+  return (d.getMonth()+1)+'月'+d.getDate()+'日（'+w+'）'+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
+}
+function loadCancelList(){
+  var body=document.getElementById('cancelBody'); if(!body) return;
+  if(!st.idToken){
+    // LINE外（ブラウザ）／本人確認トークン未取得＝LINEから開いてもらう案内（#92）
+    body.innerHTML='<div class="soon-box"><div class="done-icon">📱</div><div class="done-title">LINEから開いてください</div><div class="done-msg">ご予約のキャンセルは、公式LINEのトーク画面（予約メニュー）から開いてご利用ください。</div></div>';
+    return;
+  }
+  body.innerHTML='<div class="cl-loading">ご予約を確認しています…</div>';
+  sbEdge('list',{}).then(function(r){
+    // 取得失敗（HTTPエラー/RPC例外）と「予約ゼロ件」を区別する
+    if(!r||!r.ok||!Array.isArray(r.data)){ body.innerHTML='<div class="msg-err" style="margin:24px">ご予約の取得に失敗しました。時間をおいて再度お試しください。</div>'; return; }
+    renderCancelList(r.data);
+  }).catch(function(){ body.innerHTML='<div class="msg-err" style="margin:24px">ご予約の取得に失敗しました。電波の良い場所で再度お試しください。</div>'; });
+}
+function renderCancelList(rows){
+  var body=document.getElementById('cancelBody'); if(!body) return;
+  if(!rows.length){
+    body.innerHTML='<div class="soon-box"><div class="done-icon">🗓️</div><div class="done-title">キャンセルできるご予約はありません</div><div class="done-msg">今後のご予約が見つかりませんでした。</div><button class="btn btn-p" onclick="backToTalk()" style="display:inline-block;margin-top:24px;padding-left:36px;padding-right:36px;">LINEに戻る</button></div>';
+    return;
+  }
+  var h='<div class="cl-intro">キャンセルするご予約をお選びください。<br><span class="cl-sub">Webでのキャンセルは、ご予約の3日前まで承ります。</span></div>';
+  rows.forEach(function(r){
+    var dt=clDtText(r.start_at);
+    // ★3日前(72時間前)を過ぎた予約はキャンセルボタンを出さない（GAS版と同じ運用）
+    var action = r.cancellable
+      ? '<button class="btn cl-x" data-rid="'+esc(r.id)+'" data-dt="'+esc(dt)+'">このご予約をキャンセル</button>'
+      : '<div class="cl-late">ご予約3日前を過ぎているため、Webからのキャンセルはできません。お手数ですが公式LINEのトークからご連絡ください。</div>';
+    h+='<div class="cl-card"><div class="cl-dt">'+esc(dt)+'</div>'
+      +'<div class="cl-meta">'+esc(r.menu_name||'—')+'<br>担当：'+esc(r.artist_name||'—')+'</div>'
+      + action + '</div>';
+  });
+  h+='<div class="cl-note">※ キャンセル後の取り消しはできません。日時変更をご希望の場合は、キャンセル後にもう一度ご予約ください。</div>';
+  body.innerHTML=h;
+}
+function showCancelDone(dt){
+  var body=document.getElementById('cancelBody'); if(!body) return;
+  body.innerHTML='<div class="soon-box"><div class="done-icon">✅</div><div class="done-title">キャンセルを承りました</div><div class="done-msg">'+esc(dt||'')+' のご予約をキャンセルしました。<br>またのご予約をお待ちしております。</div><button class="btn btn-p" onclick="backToTalk()" style="display:inline-block;margin-top:24px;padding-left:36px;padding-right:36px;">LINEに戻る</button></div>';
+}
+// キャンセルボタン（イベント委譲・data-* から取得＝注入対策）
+document.addEventListener('click', function(e){
+  var b=(e.target&&e.target.closest)?e.target.closest('.cl-x'):null;
+  if(!b) return;
+  var rid=b.getAttribute('data-rid'), dt=b.getAttribute('data-dt');
+  if(!window.confirm((dt||'このご予約')+' をキャンセルします。よろしいですか？')) return;
+  b.disabled=true; b.textContent='キャンセル中…';
+  sbEdge('cancel',{p_resv:rid}).then(function(r){
+    if(r&&r.ok){ showCancelDone(dt); return; }
+    b.disabled=false; b.textContent='このご予約をキャンセル';
+    var msg=(r&&r.data&&r.data.message)||'';
+    if(/too_late/.test(msg)) window.alert('ご予約時間が近い／過ぎているため、Web上ではキャンセルできません。お手数ですが公式LINEのトークからご連絡ください。');
+    else if(/already_cancelled/.test(msg)){ window.alert('このご予約はすでにキャンセル済みです。'); loadCancelList(); }
+    else window.alert('キャンセルできませんでした。お手数ですが公式LINEのトークからご連絡ください。');
+  }).catch(function(){ b.disabled=false; b.textContent='このご予約をキャンセル'; window.alert('通信エラーが発生しました。'); });
+});
+
+// ===== 事前問診票（?mode=questionnaire）：本人のLINE IDトークンで送信→カルテ自動反映 =====
+function qRadio(name,opts){ return '<div class="q-opts">'+opts.map(function(o,i){ return '<label class="q-opt"><input type="radio" name="'+name+'" value="'+esc(o)+'"'+(i===0?' checked':'')+'> '+esc(o)+'</label>'; }).join('')+'</div>'; }
+function qCheck(name,opts){ return '<div class="q-opts">'+opts.map(function(o){ return '<label class="q-opt"><input type="checkbox" name="'+name+'" value="'+esc(o)+'"> '+esc(o)+'</label>'; }).join('')+'</div>'; }
+function qVal(name){ var el=document.querySelector('input[name="'+name+'"]:checked'); return el?el.value:''; }
+function qChecks(name){ var a=[]; var els=document.querySelectorAll('input[name="'+name+'"]:checked'); for(var i=0;i<els.length;i++) a.push(els[i].value); return a; }
+function qLoad(){
+  var body=document.getElementById('qBody'); if(!body) return;
+  if(!st.idToken){
+    body.innerHTML='<div class="soon-box"><div class="done-icon">📱</div><div class="done-title">LINEから開いてください</div><div class="done-msg">事前問診は、公式LINEのトーク画面（問診のご案内）から開いてご記入ください。</div></div>';
+    return;
+  }
+  var dz=['高血圧','糖尿病','心臓の病気','アレルギー体質','ケロイド体質','皮膚の病気','感染症（肝炎等）','その他'];
+  var h=''
+    +'<div class="cl-intro">ご来店前に、下記の事前問診をご記入ください。<br><span class="cl-sub">※未記入の場合、当日施術ができないことがあります。</span></div>'
+    +'<div class="q-f"><label class="q-l">お名前<span class="q-req">必須</span></label><input id="q_name" class="q-in" type="text" value="'+esc((st.bookingName||st.displayName)||'')+'"></div>'
+    +'<div class="q-f"><label class="q-l">電話番号<span class="q-req">必須</span></label><input id="q_phone" class="q-in" type="tel" inputmode="numeric" placeholder="09012345678"></div>'
+    +'<div class="q-f"><label class="q-l">生年月日</label><input id="q_birth" class="q-in" type="date"></div>'
+    +'<div class="q-f"><label class="q-l">性別</label>'+qRadio('q_gender',['女性','男性','その他'])+'</div>'
+    +'<div class="q-f"><label class="q-l">ご住所（市区町村まで）</label><input id="q_area" class="q-in" type="text" placeholder="例：久留米市〇〇町"></div>'
+    +'<div class="q-f"><label class="q-l">既往歴・持病（あてはまるもの全て）</label>'+qCheck('q_dz',dz)+'</div>'
+    +'<div class="q-f"><label class="q-l">現在服用中のお薬</label><input id="q_meds" class="q-in" type="text" placeholder="無ければ「なし」"></div>'
+    +'<div class="q-f"><label class="q-l">妊娠中・授乳中ですか？</label>'+qRadio('q_preg',['いいえ','妊娠中','授乳中'])+'</div>'
+    +'<div class="q-f"><label class="q-l">金属・麻酔のアレルギー</label>'+qRadio('q_alg',['なし','あり','わからない'])+'</div>'
+    +'<div id="q_err" class="msg-err" style="display:none;margin:8px 0;"></div>'
+    +'<button class="btn btn-p" id="q_submit" onclick="qSubmit()" style="width:100%;margin-top:8px;">この内容で送信する</button>'
+    +'<div class="cl-note">送信後、内容はクリニックのカルテに反映されます。</div>';
+  body.innerHTML=h;
+  // 本名（予約の手入力名）を一度だけ取得し、お名前欄を本名でプリフィル（同意書と同じ出どころに統一）。
+  // 取得できなければLINE名のまま。お客様が手で書き換え始めていたら上書きしない。
+  // ★2026-09-18：同じ取得結果で「未記入の予約が無く、記入済みの予約だけ」なら ✅受付済み を出す（フォームを出さない）。
+  //   記入済みのお客様が再送すると サーバは no_reservation で弾く＝「送信できません」が毎回出て何度も試してしまう事案の根治。
+  if (st.bookingName === undefined){
+    st.bookingName = '';
+    st.qState = 'none';
+    sbEdge('list',{}).then(function(r){
+      if (r && r.ok && Array.isArray(r.data)){
+        st.qState = questionnaireState(r.data);
+        for (var i=0;i<r.data.length;i++){
+          if (r.data[i] && r.data[i].customer_name){ st.bookingName = String(r.data[i].customer_name); break; }
+        }
+      }
+      if (st.qState === 'done'){ qAlreadyDone(); return; }
+      var el = document.getElementById('q_name');
+      if (el && st.bookingName && (!el.value || el.value === (st.displayName||''))) el.value = st.bookingName;
+    }).catch(function(){});
+  }
+}
+// 事前問診ページの状態判定（poc/_pure.mjs の questionnaireState と同一）。
+function questionnaireState(list){
+  var arr = Array.isArray(list) ? list : [];
+  var pending = false, done = false;
+  for (var i=0;i<arr.length;i++){
+    var s = String((arr[i] && arr[i].status) || '');
+    if (s === 'pending_questionnaire' || s === 'questionnaire_reminded') pending = true;
+    else if (s === 'questionnaire_done') done = true;
+  }
+  if (pending) return 'pending';
+  if (done) return 'done';
+  return 'none';
+}
+// 送信が弾かれた時の案内文（poc/_pure.mjs の questionnaireErrMsg と同一）。
+function qErrMsg(msg, state){
+  var m = String(msg == null ? '' : msg);
+  if (/no_reservation/.test(m)){
+    if (state === 'done') return 'この問診票はすでに受け付けています。再送は不要です。内容の修正が必要な場合は、公式LINEのトークにお知らせください。';
+    return 'ご予約が確認できませんでした。先にご予約のうえ、ご来店時にスタッフへお声がけください。';
+  }
+  if (/no_uid/.test(m)) return 'お客様の確認ができませんでした。公式LINEのトーク画面から開き直してお試しください。';
+  return '送信できませんでした。お手数ですが時間をおいて再度お試しください。';
+}
+function qAlreadyDone(){
+  var body=document.getElementById('qBody'); if(!body) return;
+  body.innerHTML='<div class="soon-box"><div class="done-icon">✅</div><div class="done-title">問診票は受付済みです</div><div class="done-msg">この問診票はすでに受け付けています。<br>再送は不要です。内容の修正が必要な場合は、公式LINEのトークにお知らせください。</div><button class="btn btn-p" onclick="backToTalk()" style="display:inline-block;margin-top:24px;padding-left:36px;padding-right:36px;">LINEに戻る</button></div>';
+}
+function qSubmit(){
+  var nameEl=document.getElementById('q_name'), phoneEl=document.getElementById('q_phone'), err=document.getElementById('q_err');
+  var name=(nameEl.value||'').trim();
+  var phone=(phoneEl.value||'').replace(/[^0-9]/g,'');
+  if(!name||phone.length<10){ err.style.display='block'; err.textContent='お名前と電話番号（数字10桁以上）をご入力ください。'; return; }
+  err.style.display='none';
+  var dz=qChecks('q_dz');
+  var answers={
+    '氏名':name,
+    '生年月日':(document.getElementById('q_birth').value||''),
+    '性別':qVal('q_gender'),
+    'ご住所':(document.getElementById('q_area').value||'').trim(),
+    '既往歴・持病': dz.length?dz.join('、'):'なし',
+    '服用中のお薬':(document.getElementById('q_meds').value||'').trim()||'なし',
+    '妊娠・授乳':qVal('q_preg'),
+    '金属・麻酔アレルギー':qVal('q_alg')
+  };
+  var btn=document.getElementById('q_submit'); btn.disabled=true; btn.textContent='送信中…';
+  sbEdge('questionnaire',{p_phone:phone,p_answers:answers}).then(function(r){
+    if(r&&r.ok){ qDone(); return; }
+    var msg=(r&&r.data&&r.data.message)||'';
+    // 記入済み（未記入の予約が無い）で弾かれた＝受付済み画面へ。それ以外は理由に合わせた案内。
+    if(/no_reservation/.test(msg) && st.qState==='done'){ qAlreadyDone(); return; }
+    btn.disabled=false; btn.textContent='この内容で送信する';
+    err.style.display='block'; err.textContent=qErrMsg(msg, st.qState);
+  }).catch(function(){ btn.disabled=false; btn.textContent='この内容で送信する'; err.style.display='block'; err.textContent='通信エラーが発生しました。電波の良い場所で再度お試しください。'; });
+}
+function qDone(){
+  var body=document.getElementById('qBody'); if(!body) return;
+  body.innerHTML='<div class="soon-box"><div class="done-icon">✅</div><div class="done-title">ご記入ありがとうございました</div><div class="done-msg">事前問診を受け付けました。<br>当日お会いできるのを楽しみにしております。</div><button class="btn btn-p" onclick="backToTalk()" style="display:inline-block;margin-top:24px;padding-left:36px;padding-right:36px;">LINEに戻る</button></div>';
+}
+
+// ===== JISSO AI：問い合わせフォーム（?mode=inquiry・既定）。本人のLINE IDトークンで送信（指示書5章） =====
+//   入力項目：会社名・ご担当者名/部署・メール（必須）、希望の研修・人数・希望の時期・顧問社労士・紹介者・ご相談内容、
+//   個人情報の取扱いへの同意（必須）。受講者の氏名・生年月日・雇用保険の加入状況は聞かない。
+var PRIVACY_POLICY_URL = "https://jisso-ai-inc.github.io/line/privacy.html";
+function inqField(label, req, inner){ return '<div class="q-f"><label class="q-l">'+label+(req?'<span class="q-req">必須</span>':'')+'</label>'+inner+'</div>'; }
+function inqRadio(name, opts){ return '<div class="q-opts">'+opts.map(function(o){ return '<label class="q-opt"><input type="radio" name="'+name+'" value="'+esc(o[0])+'"> '+esc(o[1])+'</label>'; }).join('')+'</div>'; }
+function inqLoad(){
+  var body=document.getElementById('inqBody'); if(!body) return;
+  if(!st.idToken){
+    body.innerHTML='<div class="soon-box"><div class="done-icon">📱</div><div class="done-title">LINEから開いてください</div><div class="done-msg">お問い合わせは、JISSO AI 公式LINEのメニュー「相談・お問い合わせ」から開いてください。<br>メールでも受け付けています：jisso.ai.fuk@gmail.com</div></div>';
+    return;
+  }
+  var privacyOk = /^https:\/\//.test(PRIVACY_POLICY_URL);
+  var h=''
+    +'<div class="cl-intro">研修についてのご相談・お問い合わせを受け付けています。<br><span class="cl-sub">担当者より2営業日以内にご連絡します。</span></div>'
+    +inqField('会社名',true,'<input id="inq_company" class="q-in" type="text" maxlength="100" autocomplete="organization">')
+    +inqField('ご担当者名・部署',true,'<input id="inq_contact" class="q-in" type="text" maxlength="100" placeholder="例：山田 太郎（総務部）">')
+    +inqField('メールアドレス',true,'<input id="inq_email" class="q-in" type="email" maxlength="254" autocomplete="email" inputmode="email">')
+    +inqField('希望の研修',false,inqRadio('inq_choice',[['process_automation','① 生成AIエージェントを活用した業務プロセス自動化の設計・実装研修'],['system_inhouse','② AI駆動開発による業務システム内製化技術研修'],['both','両方'],['undecided','未定']]))
+    +inqField('受講予定人数',false,'<input id="inq_count" class="q-in" type="number" min="1" max="1000" inputmode="numeric" placeholder="例：3">')
+    +inqField('希望の時期',false,'<select id="inq_period" class="q-in"><option value="">未定</option></select>')
+    +inqField('顧問社労士',false,inqRadio('inq_sr',[['yes','いる'],['no','いない'],['unknown','わからない']]))
+    +inqField('紹介者',false,inqRadio('inq_refr',[['none','なし'],['nagamatsu','永松さん'],['other','その他']])+'<input id="inq_refr_other" class="q-in" type="text" maxlength="100" placeholder="その他の方のお名前" style="display:none;margin-top:8px;">')
+    +inqField('ご相談内容',false,'<textarea id="inq_msg" class="q-in" rows="5" maxlength="2000"></textarea>')
+    +'<div class="q-f"><label class="q-opt"><input type="checkbox" id="inq_agree"> '
+      +(privacyOk?'<a id="inq_privacy" target="_blank" rel="noopener">個人情報の取扱い</a>':'個人情報の取扱い')
+      +'に同意します<span class="q-req">必須</span></label></div>'
+    +'<div class="cl-note">※受講者の方のお名前・生年月日・雇用保険の加入状況は、ここでは入力しないでください（お申込み後にメールでご案内します）。</div>'
+    +'<div id="inq_err" class="msg-err" style="display:none;margin:8px 0;"></div>'
+    +'<button class="btn btn-p" id="inq_submit" style="width:100%;margin-top:8px;">この内容で送信する</button>';
+  body.innerHTML=h;
+  if(privacyOk) document.getElementById('inq_privacy').href=PRIVACY_POLICY_URL;
+  var refrs=document.querySelectorAll('input[name="inq_refr"]');
+  for(var i=0;i<refrs.length;i++) refrs[i].addEventListener('change',function(){
+    document.getElementById('inq_refr_other').style.display=(qVal('inq_refr')==='other')?'block':'none';
+  });
+  document.getElementById('inq_submit').addEventListener('click', inqSubmit);
+  // メニューA「この研修を相談する」から来たら、希望の研修を選んだ状態にする（?choice=）。
+  var pre=getQueryParam('choice');
+  if(pre && /^(process_automation|system_inhouse|both|undecided)$/.test(pre)){
+    var r=document.querySelector('input[name="inq_choice"][value="'+pre+'"]'); if(r) r.checked=true;
+  }
+  // 希望の時期（開催枠）をサーバの設定から取る。取れなければ「未定」だけ。
+  sbEdge('inquiry_options',{}).then(function(r){
+    var list=(r&&r.ok&&r.data&&Array.isArray(r.data.sessions))?r.data.sessions:[];
+    var sel=document.getElementById('inq_period'); if(!sel) return;
+    list.forEach(function(t){ var o=document.createElement('option'); o.value=String(t); o.textContent=String(t); sel.appendChild(o); });
+  }).catch(function(){});
+}
+// 入力チェック（poc/_pure.mjs の validateInquiry と同一）。
+function validateInquiry(v){
+  if(!v.company_name) return '会社名をご入力ください。';
+  if(!v.contact_name) return 'ご担当者名・部署をご入力ください。';
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.email||'')) return 'メールアドレスを正しくご入力ください。';
+  if(v.headcount && !/^[0-9]{1,4}$/.test(v.headcount)) return '受講予定人数は数字でご入力ください。';
+  if(v.headcount && (Number(v.headcount)<1 || Number(v.headcount)>1000)) return '受講予定人数は1〜1000でご入力ください。';
+  if(!v.privacy_agreed) return '個人情報の取扱いへの同意にチェックしてください。';
+  return '';
+}
+function inqErrMsg(msg){
+  var m=String(msg==null?'':msg);
+  if(/too_soon/.test(m)) return '先ほどのお問い合わせを受け付けています。続けて送る場合は1分ほどおいてください。';
+  if(/invalid_email/.test(m)) return 'メールアドレスを正しくご入力ください。';
+  if(/privacy_not_agreed/.test(m)) return '個人情報の取扱いへの同意にチェックしてください。';
+  if(/invalid_/.test(m)) return '入力内容をご確認ください。';
+  if(/unauthorized|no_tenant/.test(m)) return 'お客様の確認ができませんでした。公式LINEのメニューから開き直してお試しください。';
+  if(/rate_limited/.test(m)) return '短時間に続けて送信されています。少しおいてから再度お試しください。';
+  return '送信できませんでした。お手数ですが時間をおいて再度お試しいただくか、jisso.ai.fuk@gmail.com までご連絡ください。';
+}
+function inqSubmit(){
+  function val(id){ var el=document.getElementById(id); return el?String(el.value||'').trim():''; }
+  var v={
+    company_name: val('inq_company'),
+    contact_name: val('inq_contact'),
+    email: val('inq_email'),
+    training_choice: qVal('inq_choice'),
+    headcount: val('inq_count'),
+    preferred_period: val('inq_period'),
+    has_sharoushi: qVal('inq_sr'),
+    referrer: qVal('inq_refr'),
+    referrer_other: qVal('inq_refr')==='other' ? val('inq_refr_other') : '',
+    message: val('inq_msg'),
+    privacy_agreed: !!(document.getElementById('inq_agree')||{}).checked
+  };
+  var err=document.getElementById('inq_err');
+  var bad=validateInquiry(v);
+  if(bad){ err.style.display='block'; err.textContent=bad; return; }
+  err.style.display='none';
+  var btn=document.getElementById('inq_submit'); btn.disabled=true; btn.textContent='送信中…';
+  sbEdge('inquiry',{inquiry:v}).then(function(r){
+    if(r&&r.ok){ inqDone(); return; }
+    btn.disabled=false; btn.textContent='この内容で送信する';
+    err.style.display='block'; err.textContent=inqErrMsg((r&&r.data&&r.data.message)||'');
+  }).catch(function(){ btn.disabled=false; btn.textContent='この内容で送信する'; err.style.display='block'; err.textContent='通信エラーが発生しました。電波の良い場所で再度お試しください。'; });
+}
+function inqDone(){
+  var body=document.getElementById('inqBody'); if(!body) return;
+  body.innerHTML='<div class="soon-box"><div class="done-icon">✅</div><div class="done-title">お問い合わせを受け付けました</div><div class="done-msg">担当者より2営業日以内にご連絡します。<br>（土日祝・年末年始を除く）</div><button class="btn btn-p" onclick="backToTalk()" style="display:inline-block;margin-top:24px;padding-left:36px;padding-right:36px;">LINEに戻る</button></div>';
+}
+
+// ===== 同意書（方式A：指で署名→画像で保存。PDFは作らない） =====
+// 文面・写真項目・版は src/consent.js（GAS版・純粋ロジック）からそのまま転記。
+// ※ 本文は固定テキスト（お客様の入力値を含まない）のため、そのままHTMLとして安全。
+var CONSENT_VERSION='2026-06';
+
+// 写真使用の同意項目（紙の同意書「施術写真の使用について」4項目）。key は submit_consent の引数に対応。
+function consentPhotoQuestions(){
+  return [
+    { key:'tv_full', label:'マスメディア（TV）・雑誌への使用：顔全体の使用' },
+    { key:'tv_part', label:'マスメディア（TV）・雑誌への使用：施術部位のみの使用' },
+    { key:'sns_full', label:'SNS（Instagramなど）・HPへの使用：顔全体の使用' },
+    { key:'sns_part', label:'SNS（Instagramなど）・HPへの使用：施術部位のみの使用' },
+  ];
+}
+
+// 同意書の本文（読む内容）。src/consent.js の consentBodyHtml() と同一の固定文言。
+function consentBodyHtml(){
+  return ''
+    +'<p class="cs-intro">当院では患者様に十分な情報の提供を行い、同意の上で医療施術を行っています。</p>'
+    +'<h3>【アートメイクとは】</h3>'
+    +'<p>メディカルアートメイクとは汗や水、洗顔で落ちない持続性のあるメイクです。滅菌された特殊な針を使用し、表皮下の0.5〜2mmの浅い層に色素を定着させていきます。定着には2〜3回ほど施術が必要となりますが、刺青やタトゥーとは違い、徐々に薄くなっていきます。メディカルアートメイクの持続期間の目安は、年齢や肌質、新陳代謝により個人差はありますが、施術後1〜2年程度持続します。又、完全になくなるわけではなく、徐々に薄くなっていきますので1〜2年ごとのメンテナンスをお勧め致します。アートメイクの色素に含まれる金属は微量ですのでMRI撮影も可能です。</p>'
+    +'<h3>【合併症】</h3>'
+    +'<p>出血、肥厚性瘢痕、ケロイド、色素脱失、ヘルペス、アレルギー、ブロック注射による神経障害など。個人差はありますがインク線が拡散することがあります。<br>※拡散とはアートメイク専門用語でインクが滲むことを指します。肌質・体質等により原因は様々です。</p>'
+    +'<h3>【アートメイク施術後の症状について】</h3>'
+    +'<ul>'
+    +'<li>施術後3日間は傷の部分が赤くなったり腫れたりすることがございます。また直後は濃く見えることが多く、徐々に薄い皮がめくれ1週間〜10日ほどで次第に薄く馴染んできます。</li>'
+    +'<li>2回コース選択された方は2回目施術の有効期限は2ヶ月間です。（2ヶ月以降に行う場合は別途追加料金がかかります。）</li>'
+    +'<li>アートメイク施術後、部分修正・お色の変更を希望される場合は、2回目にて承ります。</li>'
+    +'</ul>'
+    +'<h3>【注意事項】</h3>'
+    +'<p>以下に該当される方は、施術をお断りしております。</p>'
+    +'<ul>'
+    +'<li>妊娠中・授乳中・不妊治療中・妊娠の可能性のある方。（※コース購入後に妊娠が判明した場合はご連絡日より1年間延長とさせていただきます。）</li>'
+    +'<li>感染症・ヘルペス・糖尿病・心疾患・膠原病・自己免疫性疾患などの既往歴のある方。</li>'
+    +'<li>アレルギー体質の方。</li>'
+    +'<li>施術範囲に皮膚疾患がある方、ケロイド体質の方。</li>'
+    +'<li>既にアートメイクをされており、傷の状態が治癒していないと判断した場合。</li>'
+    +'<li>抗がん剤治療中、治療後の方。</li>'
+    +'<li>日焼け直後の方、日焼けをされるご予定のある方。眉毛のティントが残っている方、2週間以内に施術範囲のカラー予定の方、またカラー後の方。</li>'
+    +'<li>アイラインご希望でまつ毛エクステを外せない方、緑内障の方。</li>'
+    +'<li>顔の整形・手術などをされる方はご相談ください。</li>'
+    +'</ul>'
+    +'<h3>【美容治療歴】</h3>'
+    +'<ul>'
+    +'<li>施術範囲近くの美容手術を受けられた方は、腫れなどのダウンタイム終了後の施術をお願いしております。また、2回コース途中での美容手術はお控えください。</li>'
+    +'<li>ヒアルロン酸・ボトックス等の注入治療は施術前1ヶ月以内はお控えください。持続期間によってはアートメイク1回目以降のデザインが大きく変わることもございますのでご注意ください。※ご心配な方は事前にご相談ください。</li>'
+    +'<li>他院にて美肌治療中の方（美肌レーザー・脱毛）は、変色などの原因にもなりますので、美肌治療時にはアートメイクが入っている旨をお伝えください。また、ピーリング等は定着不良の原因となりますので施術前後最低1ヶ月はお控えください。</li>'
+    +'<li>継続して美容治療を行われている方は事前に必ずお伝えください。</li>'
+    +'<li>ホームケア等でビタミンA・レチノール等をご使用中の方は、施術前後最低2週間はご使用をお控えください。</li>'
+    +'<li>定着の良し悪しや、デザインの左右差によっての返金はできかねます。肌質・体質等によっては定着が悪く回数がかかる場合もございます。</li>'
+    +'<li>ジムやプール、マリンスポーツなどの運動でよく汗をかく方は、退色が早まる可能性がございます。</li>'
+    +'<li>デザインの微調整やカラーチェンジは2回目の施術の際に行いますので、皮膚が癒えるまで最低3週間はお待ちください。但し、大幅なデザイン変更・カラーチェンジは出来かねる場合もございます。</li>'
+    +'<li>骨格・筋肉の付き方・癖等によって全ての方に左右差がございます。完璧すぎるデザインを求められる方は、アートメイクの施術をお断りさせていただくことがございます。</li>'
+    +'<li>アートメイクは一度入れると簡単に除去することはできません。</li>'
+    +'<li>除去・修正をご希望の場合は全て自己負担での施術となります。</li>'
+    +'</ul>'
+    +'<p class="cs-note">※1回目の定着は個人差がありますが、約50%前後です。</p>'
+    +'<h3>【患者様との位置関係】</h3>'
+    +'<p>クリニックは看護師に場所を提供するレンタルクリニック方式を採用しておりますので、患者様と看護師との施術同意となります。クリニックはあくまで患者様が施術を受けていいか判断をしてもらう形になりますのでご了承ください。</p>'
+    +'<h3>【責任所在の確認】</h3>'
+    +'<p>クリニックはあくまで施術を行っていいのかの判断と場所を貸し出す形になるので、施術後何らかの肌トラブル等があった場合は施術を担当した看護師にご連絡ください。</p>'
+    +'<h3>【キャンセル料について】</h3>'
+    +'<ul>'
+    +'<li>ご予約日前日の営業時間内にキャンセル・日にち変更のご連絡をいただいた場合は、施術予定メニュー料金の半額をキャンセル料としてご請求させていただきます。</li>'
+    +'<li>当日の日程変更・当日キャンセル・無断キャンセルにつきましては、ご予約いただいている施術メニューの全額を請求いたします。ご予約時間を15分過ぎた場合も当日キャンセル扱いとみなします。</li>'
+    +'</ul>'
+    +'<h3>【部位別の注意】</h3>'
+    +'<p class="cs-sub">◆眉</p>'
+    +'<ul>'
+    +'<li>1本1本毛並みを描くストローク技法で施術した場合、経過時にはグラデーションで施したように変化して見えることがあります。</li>'
+    +'<li>レーザートーニング等の色素に反応する治療を受ける際は、施術箇所に照射しないように注意が必要です。</li>'
+    +'</ul>'
+    +'<p class="cs-sub">◆アイライン</p>'
+    +'<ul>'
+    +'<li>目尻を伸ばしたテール付きデザインは、肌質・皮膚の弾力・目の形などにより左右差が生じる場合があります。</li>'
+    +'<li>インライン（目の生え際の内側粘膜の部分）への染色は基本的にお断りしています。</li>'
+    +'<li>毛細血管の位置を肉眼で確認することはできないため、特に目頭・目尻については色素が血管内に流入し、滲んだように見えることがあります。</li>'
+    +'<li>まつ毛エクステを装着する場合は、アイライン施術後1週間は空けるようにしてください。</li>'
+    +'</ul>'
+    +'<p class="cs-sub">◆リップ</p>'
+    +'<ul>'
+    +'<li>オーバーリップ（ご自身の口唇よりも大きく染色する場合）は基本的にお断りしています。</li>'
+    +'<li>口唇にくすみがある場合、色素を染色することでくすみが表面化し黒く発色する場合があります。</li>'
+    +'<li>施術当日は、創部に雑菌が入らないように飲み物はストローを使用し、食べ物が直接唇に触れないように気をつけてください。</li>'
+    +'<li>体質や体調により、施術後4〜5日経過するとヘルペスを発症する場合があります。発症から48時間に特定の抗ウイルス薬を内服していただくと回復が早まりますが、発症後は十分な休養をとるようにしてください。</li>'
+    +'</ul>'
+    +'<p class="cs-sub">◆ホクロ</p>'
+    +'<ul>'
+    +'<li>レーザートーニング等の色素に反応する治療を受ける際は、施術箇所に照射しないよう注意が必要です。</li>'
+    +'</ul>'
+    +'<p class="cs-agree">上記内容を理解し承諾したうえで、アートメイクの施術を希望します。</p>';
+}
+
+// 写真使用4項目の回答（既定いいえ）。送信時に submit_consent の p_tv_full 等へ渡す。
+var consentPhoto={ tv_full:'no', tv_part:'no', sns_full:'no', sns_part:'no' };
+var csCanvas=null, csCtx=null, csDrawing=false, csHasInk=false, csLastX=0, csLastY=0;
+
+// 今日の日付（yyyy年MM月dd日）。
+function consentToday(){
+  var d=new Date();
+  return d.getFullYear()+'年'+p2(d.getMonth()+1)+'月'+p2(d.getDate())+'日';
+}
+
+// 同意書フォームを描画。UID が無ければ（ブラウザ＝LINE外）案内のみ。
+function loadConsentForm(){
+  var body=document.getElementById('consentBody'); if(!body) return;
+  if(!st.uid){
+    body.innerHTML='<div class="soon-box"><div class="done-icon">📱</div><div class="done-title">LINEから開いてください</div><div class="done-msg">同意書のご署名は、公式LINEのトーク画面から開いてご利用ください。</div></div>';
+    return;
+  }
+  // 写真項目は毎回リセット（再表示時の取り違え防止）。
+  consentPhoto={ tv_full:'no', tv_part:'no', sns_full:'no', sns_part:'no' };
+
+  // 名前は「予約時に手入力された本名」を優先。無ければLINE名（フォールバック）。
+  var _cnm = (st.bookingName && String(st.bookingName).trim()) ? String(st.bookingName).trim() : (st.displayName||'');
+  var greet = _cnm ? (esc(_cnm)+' 様') : 'お客様';
+  var h='<div class="cs-greet">'+greet+'</div>';
+  h+='<div class="cs-meta">版：'+esc(CONSENT_VERSION)+'　／　署名日：'+esc(consentToday())+'</div>';
+  // 本文（固定HTML＝安全）。スクロールして全文を読む。
+  h+='<div class="cs-read">'+consentBodyHtml()+'</div>';
+  // 写真使用 Yes/No（4項目）
+  h+='<div class="cs-sec">施術写真の使用について</div>';
+  h+='<div class="cs-photo-note">※モニター・キャンペーンご利用の患者様に関しましては、全てお写真のご提供が必要となります。また、カルテ保存・記録のため全ての方の施術前後のお写真は撮らせて頂いております。</div>';
+  consentPhotoQuestions().forEach(function(q){
+    h+='<div class="cs-q"><div class="cs-q-label">'+esc(q.label)+'</div>'
+      +'<div class="cs-yn" data-cskey="'+esc(q.key)+'">'
+      +'<button type="button" class="cs-yn-yes" data-csval="yes">はい</button>'
+      +'<button type="button" class="cs-yn-no on-no" data-csval="no">いいえ</button>'
+      +'</div></div>';
+  });
+  // 署名 canvas
+  h+='<div class="cs-sec">ご署名</div>';
+  h+='<div class="cs-sign-wrap"><div class="cs-sign-hd"><span class="lbl">下の枠内に指でご署名ください</span>'
+    +'<button type="button" class="cs-sign-clear" id="csClear">書き直す</button></div>'
+    +'<canvas id="consentCanvas"></canvas>'
+    +'<div class="cs-sign-hint">枠の中を指でなぞると署名できます。間違えたら「書き直す」で消せます。</div></div>';
+  h+='<div id="csSubmitErr" class="cs-submit-err"></div>';
+  body.innerHTML=h;
+
+  // 送信ボタンは固定フッターに出す（予約ウィザードと同じ step-nav）。s-consent には専用フッターを足す。
+  ensureConsentNav();
+  setupConsentCanvas();
+  updateConsentSubmit();
+
+  // 本人の予約から本名（予約時の手入力名）を一度だけ取得し、挨拶を本名に差し替える。
+  //   取得できなければ（予約が無い/サーバ未対応）LINE名のまま。署名フォームは作り直さない（挨拶だけ更新）。
+  if (st.bookingName === undefined){
+    st.bookingName = '';
+    sbEdge('list',{}).then(function(r){
+      if (r && r.ok && Array.isArray(r.data)){
+        for (var i=0;i<r.data.length;i++){
+          if (r.data[i] && r.data[i].customer_name){ st.bookingName = String(r.data[i].customer_name); break; }
+        }
+      }
+      var g = document.querySelector('#s-consent .cs-greet');
+      var nn = (st.bookingName || st.displayName || '').trim();
+      if (g && nn) g.textContent = nn + ' 様';
+    }).catch(function(){});
+  }
+}
+
+// s-consent 用の固定フッター（送信ボタン）を一度だけ用意。
+function ensureConsentNav(){
+  var sec=document.getElementById('s-consent');
+  if(!sec) return;
+  if(document.getElementById('csNav')) return;
+  var nav=document.createElement('nav');
+  nav.className='step-nav';
+  nav.id='csNav';
+  nav.innerHTML='<button class="btn btn-p" id="csSubmit" onclick="submitConsentForm()" disabled>同意して署名を送信</button>';
+  sec.appendChild(nav);
+}
+
+// 写真使用 はい/いいえ トグル（イベント委譲・data-* から取得＝注入対策）。
+document.addEventListener('click', function(e){
+  var btn=(e.target&&e.target.closest)?e.target.closest('.cs-yn button'):null;
+  if(!btn) return;
+  var wrap=btn.closest('.cs-yn'); if(!wrap) return;
+  var key=wrap.getAttribute('data-cskey'), val=btn.getAttribute('data-csval');
+  if(!key||!consentPhoto.hasOwnProperty(key)) return;
+  consentPhoto[key]=(val==='yes')?'yes':'no';
+  // 見た目を反映
+  var yes=wrap.querySelector('.cs-yn-yes'), no=wrap.querySelector('.cs-yn-no');
+  if(yes) yes.className='cs-yn-yes'+(consentPhoto[key]==='yes'?' on-yes':'');
+  if(no)  no.className ='cs-yn-no'+(consentPhoto[key]==='no'?' on-no':'');
+});
+
+// 「書き直す」ボタン（イベント委譲）。
+document.addEventListener('click', function(e){
+  var b=(e.target&&e.target.closest)?e.target.closest('#csClear'):null;
+  if(!b) return;
+  clearConsentCanvas();
+});
+
+// canvas を画面幅に合わせて初期化し、指/マウスの描画ハンドラを付ける。
+function setupConsentCanvas(){
+  csCanvas=document.getElementById('consentCanvas');
+  if(!csCanvas) return;
+  // 表示サイズ（CSS）に内部解像度を合わせる。Retina対応で見た目をくっきりさせる。
+  var rect=csCanvas.getBoundingClientRect();
+  var dpr=window.devicePixelRatio||1;
+  csCanvas.width=Math.round(rect.width*dpr);
+  csCanvas.height=Math.round(rect.height*dpr);
+  csCtx=csCanvas.getContext('2d');
+  csCtx.setTransform(dpr,0,0,dpr,0,0); // 以降は CSS px 座標で描ける
+  csCtx.fillStyle='#ffffff';
+  csCtx.fillRect(0,0,rect.width,rect.height);
+  csCtx.strokeStyle='#111111';
+  csCtx.lineWidth=2.2;
+  csCtx.lineCap='round';
+  csCtx.lineJoin='round';
+  csHasInk=false;
+
+  // タッチ（指）。ページスクロールを止めるため preventDefault。
+  csCanvas.addEventListener('touchstart', csTouchStart, { passive:false });
+  csCanvas.addEventListener('touchmove',  csTouchMove,  { passive:false });
+  csCanvas.addEventListener('touchend',   csTouchEnd,   { passive:false });
+  csCanvas.addEventListener('touchcancel',csTouchEnd,   { passive:false });
+  // マウス（PC確認用）。
+  csCanvas.addEventListener('mousedown', csMouseDown);
+  csCanvas.addEventListener('mousemove', csMouseMove);
+  window.addEventListener('mouseup', csMouseUp);
+}
+// canvas 上の座標（CSS px）に変換。
+function csPos(clientX, clientY){
+  var rect=csCanvas.getBoundingClientRect();
+  return { x:clientX-rect.left, y:clientY-rect.top };
+}
+function csBegin(x,y){ csDrawing=true; csLastX=x; csLastY=y; }
+function csStroke(x,y){
+  if(!csDrawing||!csCtx) return;
+  csCtx.beginPath();
+  csCtx.moveTo(csLastX,csLastY);
+  csCtx.lineTo(x,y);
+  csCtx.stroke();
+  // 点（タップだけ）でも痕が残るように小さな点を打つ
+  csCtx.beginPath(); csCtx.arc(x,y,1.1,0,Math.PI*2); csCtx.fillStyle='#111111'; csCtx.fill();
+  csLastX=x; csLastY=y; csHasInk=true; updateConsentSubmit();
+}
+function csTouchStart(e){ e.preventDefault(); if(!e.touches.length)return; var p=csPos(e.touches[0].clientX,e.touches[0].clientY); csBegin(p.x,p.y); csStroke(p.x,p.y); }
+function csTouchMove(e){ e.preventDefault(); if(!csDrawing||!e.touches.length)return; var p=csPos(e.touches[0].clientX,e.touches[0].clientY); csStroke(p.x,p.y); }
+function csTouchEnd(e){ e.preventDefault(); csDrawing=false; }
+function csMouseDown(e){ var p=csPos(e.clientX,e.clientY); csBegin(p.x,p.y); csStroke(p.x,p.y); }
+function csMouseMove(e){ if(!csDrawing)return; var p=csPos(e.clientX,e.clientY); csStroke(p.x,p.y); }
+function csMouseUp(){ csDrawing=false; }
+
+// 署名を消す（白で塗り直す）。
+function clearConsentCanvas(){
+  if(!csCanvas||!csCtx) return;
+  var rect=csCanvas.getBoundingClientRect();
+  csCtx.fillStyle='#ffffff';
+  csCtx.fillRect(0,0,rect.width,rect.height);
+  csHasInk=false;
+  csDrawing=false;
+  var err=document.getElementById('csSubmitErr'); if(err){ err.className='cs-submit-err'; err.textContent=''; }
+  updateConsentSubmit();
+}
+// 署名が空なら送信ボタンを無効化。
+function updateConsentSubmit(){
+  var b=document.getElementById('csSubmit'); if(b) b.disabled=!csHasInk;
+}
+
+// 署名送信：submit_consent RPC。成功で完了画面、失敗は日本語で再試行可能に。
+function submitConsentForm(){
+  if(!csHasInk){ return; }
+  if(!st.idToken){
+    // 本人確認トークンが無い（LINE外/openid未許可）→ LINEから開き直しを促す（#92）
+    var e0=document.getElementById('csSubmitErr');
+    if(e0){ e0.className='msg-err'; e0.textContent='本人確認ができませんでした。公式LINEのトーク画面から開き直してお試しください。'; }
+    return;
+  }
+  var btn=document.getElementById('csSubmit');
+  var err=document.getElementById('csSubmitErr');
+  if(err){ err.className='cs-submit-err'; err.textContent=''; }
+  var dataUrl;
+  try{ dataUrl=csCanvas.toDataURL('image/png'); }
+  catch(e){ if(err){ err.className='msg-err'; err.textContent='署名の取得に失敗しました。お手数ですが書き直してお試しください。'; } return; }
+  // ★送信前にサイズチェック（高DPR端末などで署名画像が大きくなりすぎる無駄な送信を防ぐ）
+  if(!dataUrl || dataUrl.length > 2000000){ if(err){ err.className='msg-err'; err.textContent='署名のデータが大きすぎます。「書き直す」でやり直してから送信してください。'; } return; }
+  if(btn){ btn.disabled=true; btn.textContent='送信中…'; }
+  sbEdge('consent',{
+    p_customer_name: ((st.bookingName && String(st.bookingName).trim()) || st.displayName || ''),
+    p_tv_full: consentPhoto.tv_full,
+    p_tv_part: consentPhoto.tv_part,
+    p_sns_full: consentPhoto.sns_full,
+    p_sns_part: consentPhoto.sns_part,
+    p_signature: dataUrl,
+    p_version: CONSENT_VERSION
+  }).then(function(r){
+    if(r&&r.ok){ showConsentDone(); return; }
+    consentSubmitFail(btn, consentErrMsg(r));
+  }).catch(function(){
+    consentSubmitFail(btn,'送信に失敗しました。電波の良い場所で、もう一度お試しください。');
+  });
+}
+// submit_consent の失敗メッセージ（no_uid/no_signature/signature_too_large 等）を日本語へ。
+function consentErrMsg(r){
+  var msg=(r&&r.data&&(r.data.message||r.data.hint))||'';
+  msg=String(msg);
+  if(/signature_too_large/.test(msg)) return '署名が大きすぎます。お手数ですが「書き直す」でやり直してから送信してください。';
+  if(/no_signature/.test(msg))        return '署名が空のようです。枠内にご署名のうえ、もう一度お試しください。';
+  if(/bad_signature/.test(msg))       return '署名データを読み取れませんでした。「書き直す」でやり直してお試しください。';
+  if(/no_uid/.test(msg))              return 'お客様の確認ができませんでした。公式LINEのトーク画面から開き直してお試しください。';
+  if(/no_tenant/.test(msg))           return '設定エラーが発生しました。お手数ですが公式LINEのトークからご連絡ください。';
+  if(/no_reservation/.test(msg))      return 'ご予約が確認できませんでした。先にご予約のうえ、ご来店時にスタッフへお声がけください。';
+  return '署名の送信に失敗しました。お手数ですが、もう一度お試しください。';
+}
+function consentSubmitFail(btn, msg){
+  if(btn){ btn.disabled=false; btn.textContent='同意して署名を送信'; }
+  var err=document.getElementById('csSubmitErr');
+  if(err){ err.className='msg-err'; err.textContent=msg; window.scrollTo(0,document.body.scrollHeight); }
+}
+// 送信完了画面（LINEのトークへ戻るボタン）。固定フッターは隠す。
+function showConsentDone(){
+  var body=document.getElementById('consentBody'); if(!body) return;
+  var nav=document.getElementById('csNav'); if(nav) nav.style.display='none';
+  body.innerHTML='<div class="soon-box cs-done"><div class="done-icon">✅</div><div class="done-title">同意書を受け付けました</div><div class="done-msg">ご署名ありがとうございました。<br>当日はお気をつけてお越しください。</div><button class="btn btn-p" onclick="backToTalk()" style="display:inline-block;margin-top:24px;padding-left:36px;padding-right:36px;">LINEのトークに戻る</button></div>';
+}
+
+// ===== Supabase からマスタ＋店舗設定を取得し、GAS版 options 互換の形へ組み立て =====
+// 互換キー：options = { nurses:[{nurse_id,name,is_active,profile_photo_url}],
+//   menus:[{menu_id,menu_name,normal_price,monitor_price}],
+//   certified:[{nurse_id,menu_id,is_certified,duration_new_min,duration_retouch_min}],
+//   store_name, openMin, closeMin, interval, closed }
+function loadOptions(){
+  // ★マスタは public_booking_options RPC で一括取得（anonの直selectは撤去済＝他テナント横断列挙を防止）。
+  //   返却＝{ store:{営業設定}, artists:[店内・有効], menus:[テナント内・有効], artist_menus:[認定組合せ] }
+  sbRpc("public_booking_options", { p_store_id: STORE_ID }).then(function(res){
+    var d=(res&&res.ok&&res.data&&typeof res.data==='object')?res.data:{};
+    // ★Array.isArray でガード（RLS/列名ミスでエラーJSONが返っても .map で落ちない）
+    var artists=Array.isArray(d.artists)?d.artists:[];
+    var menus  =Array.isArray(d.menus)?d.menus:[];
+    var am     =Array.isArray(d.artist_menus)?d.artist_menus:[];
+    var store=(d.store&&typeof d.store==='object')?d.store:null;
+    if(!artists.length){ bootOptDone=true; showWizardIfReady(); return; }
+
+    // 担当できるメニューだけを artist_menus で絞る（poc/index.html boot() と同じ考え方）。
+    // 施術時間は artist_menus の duration を優先。
+    var nurses=artists.map(function(a){
+      return { nurse_id:a.id, name:a.name, is_active:a.is_active, profile_photo_url:a.profile_photo_url||'',
+               qualification:a.qualification||'', specialty:a.specialty||'' };
+    });
+    var menusC=menus.map(function(m){
+      return { menu_id:m.id, menu_name:m.name, normal_price:m.price_normal, monitor_price:m.price_monitor,
+               sort_order:m.sort_order, _dnew:m.duration_new_min, _dret:m.duration_retouch_min };
+    });
+    var certified=am.map(function(p){
+      // artist_menus に duration が無ければ menus 側を使う。
+      var mm=menusC.filter(function(x){return String(x.menu_id)===String(p.menu_id);})[0]||{};
+      return {
+        nurse_id:p.artist_id, menu_id:p.menu_id, is_certified:true,
+        duration_new_min:(p.duration_new_min!=null?p.duration_new_min:mm._dnew),
+        duration_retouch_min:(p.duration_retouch_min!=null?p.duration_retouch_min:mm._dret)
+      };
+    });
+
+    var openMin=hmToMin(store&&store.business_hours_start, DEF_OPEN_H*60);
+    var closeMin=hmToMin(store&&store.business_hours_end, DEF_CLOSE_H*60);
+    var interval=(store&&store.slot_interval_min&&store.slot_interval_min>0)?store.slot_interval_min:DEF_INTERVAL;
+
+    bootOpt={
+      nurses:nurses, menus:menusC, certified:certified,
+      store_name:(store&&store.name)||'',
+      openMin:openMin, closeMin:closeMin, interval:interval,
+      closed:parseClosed(store&&store.closed_days)
+    };
+    bootOptDone=true;
+    if(wizardShown){ st.options=bootOpt; applyInitialArtist(); updHeader(); if(MODE==='book'&&st.step===1) render(); }
+    else showWizardIfReady();
+  }).catch(function(){
+    bootOptDone=true; if(!wizardShown) showWizardIfReady();
+  });
+}
+
+// ===== LIFF：本人(UID・表示名)を取得（LINE内で開いたときだけ。失敗しても予約は続行） =====
+function initLiff(){
+  if(!LIFF_ID || typeof liff==='undefined'){ profileDone(); return; }
+  var advanced=false;
+  var tid=setTimeout(function(){ if(!advanced){ advanced=true; profileDone(); } },8000);
+  function advance(){ if(advanced)return; advanced=true; clearTimeout(tid); profileDone(); }
+  function applyLateProfile(p){
+    if(!p) return;
+    if(p.userId)      st.uid=p.userId;
+    if(p.displayName) st.displayName=p.displayName;
+    updHeader();
+  }
+  // ★2026-10-03：LINE の普通のブラウザ（LIFF ではない）で開かれていたら、LINE 専用の入口へ開き直す。
+  //   開き直すときは画面を進めない（入力の途中で切り替わらないよう、最初に判定する）。
+  function reopenIfNeeded(){
+    try{
+      var inClient=false; try{ inClient=!!(liff.isInClient && liff.isInClient()); }catch(e){}
+      if(!shouldReopenInLiff({ ua:navigator.userAgent, inClient:inClient, loggedIn:false, liffId:LIFF_ID, search:location.search })) return false;
+      var url=buildLiffReopenUrl(LIFF_ID, location.search); if(!url) return false;
+      advanced=true; clearTimeout(tid);
+      location.replace(url);
+      return true;
+    }catch(e){ return false; }
+  }
+  try{
+    liff.init({liffId:LIFF_ID}).then(function(){
+      if(!liff.isLoggedIn||!liff.isLoggedIn()){ if(reopenIfNeeded()) return; advance(); return; }
+      // ★#92：本人確認用のIDトークンを取得（openidスコープが必要）。キャンセル/同意書で使う。
+      try{ st.idToken = (liff.getIDToken && liff.getIDToken()) || ''; }catch(e){ st.idToken=''; }
+      liff.getProfile().then(function(p){ applyLateProfile(p); })
+                       .catch(function(){})
+                       .then(advance);
+    }).catch(function(){ if(reopenIfNeeded()) return; advance(); });
+  }catch(e){ advance(); }
+}
+
+// ===== 店舗設定の解決（多テナント化・段階3） =====
+// URLの ?store=スラッグ から stores を引いて、この店の id/tenant/name/LIFF を確定する。
+//   ・取得できれば STORE_ID / TENANT_ID / STORE_NAME / LIFF_ID を上書き（小倉など）。
+//   ・取得失敗時は既定（久留米）の埋め込み値のまま＝後方互換（久留米は今まで通り動く）。
+// ※セキュリティ操作（キャンセル/同意書/問診）はサーバ側(super-api)が id_token の aud で
+//   店を確定する。ここでの店確定は「表示するマスタ（メニュー等）を正しく選ぶ」ためだけで、
+//   スラッグを偽っても他店データの漏えいにはならない。
+// 戻り値（Promise<boolean>）：true=このまま起動してよい／false=店が特定できないので止める。
+//   ・解決できた → その店の値を採用して true。
+//   ・解決できない（行が無い/SQL未適用/通信失敗）→
+//       未指定 or 既定(kurume) なら久留米のまま true（後方互換）。
+//       明示的に別店(kokura等)が指定されていたのに見つからない時は false（久留米予約への誤倒れを防ぐ）。
+function resolveStoreConfig(){
+  function fallbackOk(){ return false; } // JISSO AI：既定の店（久留米）は無い。店が引けなければ止める。
+  // ★公開リンクは public_slug（全店で一意）で引く。code は (tenant_id,code) でしか一意でないため使わない。
+  return sbRpc("public_store_resolve", { p_slug: STORE })
+    .then(function(res){
+      var s=(res&&res.ok&&res.data&&typeof res.data==='object')?res.data:null;
+      if(s){
+        if(s.id)        STORE_ID   = s.id;
+        if(s.tenant_id) TENANT_ID  = s.tenant_id;
+        if(s.name)      STORE_NAME = s.name;
+        if(s.liff_id){ LIFF_ID = s.liff_id; return true; }
+        // 店は特定できたが、この店のLIFFが未設定（例：小倉のLIFF作成前）。
+        var explicitOther = (STORE_RAW && STORE_RAW!=='kurume');
+        if(explicitOther){
+          // 既定(久留米)LIFFへ倒すと別テナントとして本人確認されてしまう→ LIFFは使わない。
+          LIFF_ID='';
+          // 本人確認が要るモード（キャンセル/同意書/問診）はこの店のLIFFが無いと成立しない → 停止。
+          if(MODE!=='book') return false;
+        }
+        return true; // 予約(book)はLIFF無しでも作成可能（uidは付かない）。
+      }
+      return fallbackOk();
+    })
+    .catch(function(){ return fallbackOk(); });
+}
+
+// 店が特定できない時のエラー表示（誤った店で予約させない）。
+function showStoreError(){
+  try{
+    document.body.innerHTML =
+      '<div style="max-width:480px;margin:80px auto;padding:24px;font-family:sans-serif;text-align:center;color:#333;">'
+      + '<h2 style="font-size:18px;margin:16px 0;">ページを開けませんでした</h2>'
+      + '<p style="font-size:14px;line-height:1.8;color:#666;">リンクが正しくない可能性があります。<br>'
+      + 'お手数ですが、JISSO AI 公式LINEのメニューから、もう一度お試しください。<br>'
+      + 'メールでも受け付けています：jisso.ai.fuk@gmail.com</p>'
+      + '</div>';
+  }catch(e){}
+}
+
+(function boot(){
+  // ★流入リンクの着地・記録の画面（mode=land / join）は予約ページの処理を一切走らせない（2026-10-05）。
+  if(window.__JOIN_MODE){ if(window.__JOIN_MODE==='join') runJoin(); return; }
+  // ★まず店舗設定を解決してから初期化（LIFF_ID/STORE_ID/TENANT_ID を店に合わせる）。
+  resolveStoreConfig().then(function(ok){
+    if(!ok){ showStoreError(); return; }  // 明示された店が特定できない → 久留米へ倒さず停止。
+    // 予約モードのみマスタ取得（キャンセルは自分の予約一覧をUID確定後に取得・同意書は準備中）。
+    if(MODE==='book') loadOptions();
+    initLiff();
+    // 予約以外（キャンセル/同意書）は即この画面を表示（キャンセルは続いてUID確定後に一覧取得）。
+    if(MODE!=='book') showWizardIfReady();
+  });
+})();
+</script>
+</body>
+</html>
