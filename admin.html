@@ -1118,6 +1118,18 @@ body{background:var(--j-bg)!important;color:var(--j-text);font-family:"Hiragino 
 .jl-go{width:100%;margin-top:22px;padding:13px;border:0;border-radius:10px;background:var(--j-blue);color:#fff;font-weight:800;font-size:15px;cursor:pointer}
 .jl-go:hover{background:#1858BD}
 .jl-note{margin-top:18px;text-align:center;font-size:12.5px;color:var(--j-muted);line-height:1.7}
+/* 二段階認証（TOTP）の段階。#login の中で、メール・パスワード欄と入れ替えて出す。 */
+.jl-mfa-title{font-size:15px;font-weight:800;color:var(--j-navy);margin:6px 0 8px;text-align:center}
+.jl-mfa-lead{margin:0 0 10px;font-size:13px;line-height:1.8;color:#334155}
+.jl-mfa-qr{display:flex;justify-content:center;margin:6px 0 10px}
+.jl-mfa-qr img{width:180px;height:180px;background:#fff;border:1px solid #D5DEEC;border-radius:10px;padding:8px}
+.jl-mfa-sl{font-size:12px;color:var(--j-muted);margin:4px 0}
+.jl-mfa-secret{display:block;font-family:ui-monospace,Menlo,monospace;font-size:13px;letter-spacing:.06em;word-break:break-all;
+  background:#F3F6FB;border:1px solid #D5DEEC;border-radius:8px;padding:8px 10px;user-select:all}
+#mfaCode{font-size:20px;letter-spacing:.3em;text-align:center}
+.jl-go:disabled{opacity:.6;cursor:wait}
+.jl-mfa-out{width:100%;margin-top:10px;padding:11px;border:1px solid #D5DEEC;border-radius:10px;background:#fff;color:var(--j-navy);font-weight:700;font-size:14px;cursor:pointer}
+.jl-mfa-out:hover{background:#F3F6FB}
 /* スマホ・狭い画面 */
 .jd-grid>div,.jd-row>div{min-width:0}
 @media (max-width:1180px){ .jd-grid{grid-template-columns:minmax(0,1fr)} .jd-kpis{grid-template-columns:repeat(2,minmax(0,1fr))} }
@@ -1827,6 +1839,7 @@ body{background:var(--j-bg)!important;color:var(--j-text);font-family:"Hiragino 
     <div class="jl-form">
       <div class="lg"><img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDQwIiBoZWlnaHQ9IjMwMCIgdmlld0JveD0iMCAwIDEwNDAgMzAwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkpJU1NPIEFJIGhvcml6b250YWwgY29sb3IiPjx0aXRsZT5KSVNTTyBBSSDigJQgaG9yaXpvbnRhbCAvIGNvbG9yPC90aXRsZT48ZGVmcz4KPGxpbmVhckdyYWRpZW50IGlkPSJsZWZ0IiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgeDE9IjI2IiB5MT0iNDAwIiB4Mj0iMjMwIiB5Mj0iMjAiPjxzdG9wIG9mZnNldD0iMCIgc3RvcC1jb2xvcj0iIzEyM0ZDMCIvPjxzdG9wIG9mZnNldD0iMC41MiIgc3RvcC1jb2xvcj0iIzA4NkFFMCIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzM4QzhFQiIvPjwvbGluZWFyR3JhZGllbnQ+CjxsaW5lYXJHcmFkaWVudCBpZD0icmlnaHQiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIiB4MT0iMzkwIiB5MT0iNDAwIiB4Mj0iNDUwIiB5Mj0iMTI2Ij48c3RvcCBvZmZzZXQ9IjAiIHN0b3AtY29sb3I9IiMwQzlCREQiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMwODdGRTgiLz48L2xpbmVhckdyYWRpZW50Pgo8bGluZWFyR3JhZGllbnQgaWQ9ImNlbnRlciIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiIHgxPSIyODYiIHkxPSIxNTUiIHgyPSIzMDQiIHkyPSI0MDAiPjxzdG9wIG9mZnNldD0iMCIgc3RvcC1jb2xvcj0iIzE0MzhBNiIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzEwMkQ4NyIvPjwvbGluZWFyR3JhZGllbnQ+CjwvZGVmcz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSg1MCAzMCkgc2NhbGUoLjU3KSI+PHBhdGggZD0iTTAgNDAwTDIxOS4zOTMgMjBMMjY4LjM5MyAxMjZMMTg4LjcxOSAyNjRIMjI2TDg4IDQwMFoiIGZpbGw9InVybCgjbGVmdCkiIC8+PHBhdGggZD0iTTI4NiAxNTVMMzQ5IDI5MS4yODZMMzA5IDQwMEwyMzUuMTM2IDI0My4xMDRaIiBmaWxsPSJ1cmwoI2NlbnRlcikiIC8+PHBhdGggZD0iTTM4MiAxMjZINDc2TDQxNiA0MDBIMzI4TDM2MSAyOTEuMjg2WiIgZmlsbD0idXJsKCNyaWdodCkiIC8+PHBhdGggZD0iTTM2MSAyOTEuMjg2TDQxNiA0MDBIMzI4WiIgZmlsbD0iIzUxQkVFOSIgLz48Y2lyY2xlIGN4PSI0NTAiIGN5PSI2MiIgcj0iNDQiIGZpbGw9IiMwODdGRTgiLz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoNDI4IDY0KSBzY2FsZSgxLjExMikiPjxwYXRoIGQ9Ik02NCAwSDg0VjU1Qzg0IDc3IDcxIDg4IDQ1IDg4SDMzQzEyIDg4IDEgNzggMCA2MEgyMEMyMSA2NyAyNSA3MCAzNCA3MEg0NEM1OCA3MCA2NCA2NSA2NCA1M1oiIGZpbGw9IiMwQjFGNEQiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAgMCkiIGZpbGwtcnVsZT0iZXZlbm9kZCIvPjxwYXRoIGQ9Ik0wIDBIMjBWODhIMFoiIGZpbGw9IiMwQjFGNEQiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDEwOCAwKSIgZmlsbC1ydWxlPSJldmVub2RkIi8+PHBhdGggZD0iTTk2IDI0SDc2Qzc0IDE5IDY5IDE4IDYwIDE4SDMzQzIzIDE4IDE5IDIxIDE5IDI3QzE5IDMzIDIzIDM2IDMzIDM2SDYzQzg2IDM2IDk4IDQ0IDk4IDYxQzk4IDc5IDg1IDg4IDYzIDg4SDMzQzEyIDg4IDEgODAgMCA2M0gyMEMyMiA2OSAyNiA3MCAzNSA3MEg2MkM3MyA3MCA3OCA2NyA3OCA2MUM3OCA1NSA3NCA1MyA2MyA1M0gzNEMxMiA1MyAwIDQ0IDAgMjdDMCA5IDEzIDAgMzQgMEg2MUM4MiAwIDk0IDggOTYgMjRaIiBmaWxsPSIjMEIxRjREIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSgxNTIgMCkiIGZpbGwtcnVsZT0iZXZlbm9kZCIvPjxwYXRoIGQ9Ik05NiAyNEg3NkM3NCAxOSA2OSAxOCA2MCAxOEgzM0MyMyAxOCAxOSAyMSAxOSAyN0MxOSAzMyAyMyAzNiAzMyAzNkg2M0M4NiAzNiA5OCA0NCA5OCA2MUM5OCA3OSA4NSA4OCA2MyA4OEgzM0MxMiA4OCAxIDgwIDAgNjNIMjBDMjIgNjkgMjYgNzAgMzUgNzBINjJDNzMgNzAgNzggNjcgNzggNjFDNzggNTUgNzQgNTMgNjMgNTNIMzRDMTIgNTMgMCA0NCAwIDI3QzAgOSAxMyAwIDM0IDBINjFDODIgMCA5NCA4IDk2IDI0WiIgZmlsbD0iIzBCMUY0RCIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMjc0IDApIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiLz48cGF0aCBkPSJNMzYgMEg2NkM5MCAwIDEwMiAxMyAxMDIgMzdWNTFDMTAyIDc1IDkwIDg4IDY2IDg4SDM2QzEyIDg4IDAgNzUgMCA1MVYzN0MwIDEzIDEyIDAgMzYgMFpNMzYgMThDMjUgMTggMjAgMjQgMjAgMzdWNTFDMjAgNjQgMjUgNzAgMzYgNzBINjZDNzcgNzAgODIgNjQgODIgNTFWMzdDODIgMjQgNzcgMTggNjYgMThaIiBmaWxsPSIjMEIxRjREIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSgzOTYgMCkiIGZpbGwtcnVsZT0iZXZlbm9kZCIvPjwvZz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSg1NjYuMjg4IDE5Mikgc2NhbGUoLjk1KSI+PGcgZmlsbD0iIzBCMUY0RCI+PHBhdGggZD0iTTAgMjBIODRWMjRIMFpNMjA4IDIwSDI5MlYyNEgyMDhaIi8+PHBhdGggZD0iTTAgNDRMMTkgMEgyOUw0OCA0NEgzOEwzNCAzNEgxNEwxMCA0NFpNMTggMjZIMzBMMjQgMTFaIiBmaWxsPSIjMEIxRjREIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSgxMTAgMCkiIGZpbGwtcnVsZT0iZXZlbm9kZCIvPjxwYXRoIGQ9Ik0wIDBIOVY0NEgwWiIgZmlsbD0iIzBCMUY0RCIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTc0IDApIi8+PC9nPjwvZz48L3N2Zz4=" alt="JISSO AI"></div>
       <div style="font-size:16px;font-weight:800;color:#0B1F4D;text-align:center">スタッフ ログイン</div>
+      <div id="lStagePw">
       <label for="le">メールアドレス</label>
       <input id="le" type="email" placeholder="you@example.com" autocomplete="username">
       <label for="lp">パスワード</label>
@@ -1835,6 +1848,24 @@ body{background:var(--j-bg)!important;color:var(--j-text);font-family:"Hiragino 
       <div id="lerr" style="color:#c2410c;font-size:12.5px;min-height:16px;margin-top:8px"></div>
       <button class="jl-go" onclick="login()">ログイン</button>
       <div class="jl-note">ログインできない・パスワードを忘れた場合は、管理者（生野さん）にご連絡ください。</div>
+      </div>
+      <div id="lStageMfa" style="display:none">
+        <div class="jl-mfa-title" id="mfaTitle">二段階認証</div>
+        <p class="jl-mfa-lead" id="mfaLead"></p>
+        <div id="mfaEnroll" style="display:none">
+          <div class="jl-mfa-qr"><img id="mfaQr" alt="認証アプリ登録用のQRコード" width="180" height="180"></div>
+          <div class="jl-mfa-sl">QRコードを読み取れない場合は、次の文字を認証アプリに手入力してください。</div>
+          <code class="jl-mfa-secret" id="mfaSecret"></code>
+        </div>
+        <div id="mfaForm" style="display:none">
+          <label for="mfaCode">認証アプリの6桁のコード</label>
+          <input id="mfaCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="12" placeholder="123456">
+        </div>
+        <div id="mfaErr" role="status" style="color:#c2410c;font-size:12.5px;min-height:16px;margin-top:8px"></div>
+        <button type="button" class="jl-go" id="mfaGo">確認してログイン</button>
+        <button type="button" class="jl-mfa-out" id="mfaOut">やめてログアウト</button>
+        <div class="jl-note">スマホを無くした・機種変更した場合は、管理者（生野さん）に連絡してください。</div>
+      </div>
     </div>
   </div>
 </div>
@@ -1876,9 +1907,8 @@ function refreshAuth(done){
 function tryAutoLogin(){
   refreshAuth(function(ok){
     if(ok){
-      var lg=document.getElementById("login"); if(lg) lg.style.display="none";
-      // 扱えるテナントを確認 → 1件以下は自店直行／2件以上はコンソール（仁義）
-      if(typeof resolveTenantsThenEnter==="function") resolveTenantsThenEnter();
+      // ★二段階認証：aal2 ならそのまま入口（扱えるテナントを確認）、aal1 ならコード入力／初回登録へ。
+      mfaAfterAuth();
     } else { if(typeof showLogin==="function") showLogin(); }
   });
 }
@@ -2433,6 +2463,7 @@ function chatCall(action, params){
     });
   }).then(function(result){
     if(!result.ok || !result.body || result.body.ok!==true){
+      var mfaErr=mfaCheckDenied(result.status, result.body); if(mfaErr) throw mfaErr;
       var error=new Error('chat_read_failed');
       error.code=(result.body && result.body.reason) || (result.status===401 ? 'invalid_token' : 'read_failed');
       error.warningCodes=(result.body && Array.isArray(result.body.warning_codes)) ? result.body.warning_codes : [];
@@ -4812,6 +4843,250 @@ async function lsecClear(kind){
     .catch(function(){ lsecMsg("削除できませんでした。"); });
 }
 
+/* ============================================================================
+   ★2026-10-28 二段階認証（TOTP・認証アプリの6桁コード）。
+   ・ログイン／自動ログインの直後にアクセストークンの aal を見る。aal2 ならそのまま入口へ。
+   ・aal1 なら、登録済みの認証アプリがあればコード入力、無ければ初回登録（QR表示）→コード入力。
+   ・サーバー（DBの門番・Edge Functions）が mfa_required を返したら、データ画面を閉じてコード入力へ戻す。
+   ・判定の正本は poc/admin_mfa_pure.mjs。下の <mfa-pure> はその写しで、tests/admin_mfa_pure.test.mjs が一致を確かめる。
+   ・トークン・コード・secret は console に出さない。画面への出力は textContent／img.src（data:image/svg+xml のみ）。
+   ============================================================================ */
+var MFA_PURE=(function(){
+/*<mfa-pure>*/
+// 二段階認証（TOTP）の判定。ネット・画面に触れない。admin.html の <mfa-pure> はこの写し。
+// アクセストークン（JWT）の aal（認証の強さ）を読む。読めなければ null。
+function jwtAal(token) {
+ if (typeof token !== 'string') return null;
+ const parts = token.split('.');
+ if (parts.length !== 3 || !parts[1]) return null;
+ let b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+ if (!/^[A-Za-z0-9+/]*={0,2}$/.test(b64)) return null;
+ b64 = b64.replace(/=+$/, '');
+ if (b64.length % 4 === 1) return null;
+ while (b64.length % 4) b64 += '=';
+ try {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const payload = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  if (!payload || typeof payload !== 'object') return null;
+  return typeof payload.aal === 'string' && /^aal[0-9]$/.test(payload.aal) ? payload.aal : null;
+ } catch (e) { return null; }
+}
+function isTotp(f) { return !!f && typeof f === 'object' && f.factor_type === 'totp' && typeof f.id === 'string' && f.id !== ''; }
+// 登録済み（verified）の認証アプリを1つ。無ければ null。
+function pickVerifiedTotp(factors) {
+ if (!Array.isArray(factors)) return null;
+ return factors.find(f => isTotp(f) && f.status === 'verified') || null;
+}
+// 登録途中（unverified）の認証アプリ。初回登録の前に消す対象。
+function unverifiedTotps(factors) {
+ if (!Array.isArray(factors)) return [];
+ return factors.filter(f => isTotp(f) && f.status === 'unverified');
+}
+// 次にやること：'enter'＝そのまま入る／'challenge'＝コード入力／'enroll'＝初回登録。
+function mfaNextStep(s) {
+ const o = s && typeof s === 'object' ? s : {};
+ if (o.aal === 'aal2') return 'enter';
+ return pickVerifiedTotp(o.factors) ? 'challenge' : 'enroll';
+}
+// 入力されたコードを6桁の半角数字へ。全角数字・空白・ハイフンは許す。ダメなら null。
+function normalizeTotpCode(input) {
+ if (typeof input !== 'string' && typeof input !== 'number') return null;
+ const s = String(input)
+  .replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+  .replace(/[\s　 \-‐-―−－ーｰ﹣]/g, '');
+ return /^[0-9]{6}$/.test(s) ? s : null;
+}
+// サーバーの門番が「二段階認証が必要」と返したか（PostgREST の message／Edge の reason）。
+function isMfaRequiredResponse(status, body) {
+ const st = Number(status);
+ if (!Number.isFinite(st) || (st >= 200 && st < 300)) return false;
+ if (!body || typeof body !== 'object') return false;
+ return body.message === 'mfa_required' || body.reason === 'mfa_required' || body.error === 'mfa_required' || body.code === 'mfa_required';
+}
+// QRコードの画像URI：data:image/svg+xml で始まるものだけ許す。
+function safeQrDataUri(uri) {
+ return typeof uri === 'string' && /^data:image\/svg\+xml[;,]/.test(uri) ? uri : '';
+}
+// 認証の失敗理由：'invalid'＝コード違い／'expired'＝期限切れ／'auth'＝ログイン切れ／'other'。
+function mfaErrorKind(status, body) {
+ const b = body && typeof body === 'object' ? body : {};
+ const code = String(b.error_code || b.code || '');
+ const msg = String(b.msg || b.message || b.error_description || '').toLowerCase();
+ if (Number(status) === 401 || code === 'bad_jwt' || code === 'session_not_found') return 'auth';
+ if (code === 'mfa_challenge_expired' || msg.indexOf('expired') >= 0) return 'expired';
+ if (code === 'mfa_verification_failed' || msg.indexOf('invalid totp') >= 0) return 'invalid';
+ return 'other';
+}
+/*</mfa-pure>*/
+return {jwtAal:jwtAal,pickVerifiedTotp:pickVerifiedTotp,unverifiedTotps:unverifiedTotps,mfaNextStep:mfaNextStep,
+  normalizeTotpCode:normalizeTotpCode,isMfaRequiredResponse:isMfaRequiredResponse,safeQrDataUri:safeQrDataUri,mfaErrorKind:mfaErrorKind};
+})();
+// 途中状態。ログアウト・やめる・成功で必ず mfaReset() で消す。
+var MFA={ factorId:'', challengeId:'', busy:false, active:false, force:false, step:'' };
+function mfaEl(id){ return document.getElementById(id); }
+function mfaShow(id, on, disp){ var e=mfaEl(id); if(e) e.style.display = on ? (disp||'block') : 'none'; }
+function mfaStage(on){ mfaShow('lStagePw', !on); mfaShow('lStageMfa', on); }
+function mfaMsg(t, isErr){ var e=mfaEl('mfaErr'); if(!e) return; e.textContent=t||''; e.style.color=isErr?'#c2410c':'#475569'; }
+function mfaText(id, t){ var e=mfaEl(id); if(e) e.textContent=t||''; }
+function mfaSetBusy(b){ MFA.busy=!!b; var g=mfaEl('mfaGo'); if(g) g.disabled=!!b; }
+function mfaReset(){
+  MFA.factorId=''; MFA.challengeId=''; MFA.active=false; MFA.force=false; MFA.step='';
+  mfaSetBusy(false);
+  var q=mfaEl('mfaQr'); if(q) q.removeAttribute('src');
+  mfaText('mfaSecret',''); mfaText('mfaLead','');
+  var c=mfaEl('mfaCode'); if(c) c.value='';
+  mfaMsg('');
+  mfaShow('mfaEnroll', false); mfaShow('mfaForm', false);
+  mfaStage(false);
+}
+// Supabase Auth を今のトークンで呼ぶ。結果は {ok,status,body}（本文が壊れていても落ちない）。
+function mfaAuthFetch(method, path, body){
+  var h={ 'apikey':SB_KEY, 'Authorization':'Bearer '+TOKEN };
+  var opt={ method:method, headers:h };
+  if(body!==undefined){ h['Content-Type']='application/json'; opt.body=JSON.stringify(body); }
+  return fetch(SB_URL+'/auth/v1/'+path, opt).then(function(res){
+    return res.text().then(function(t){ var j=null; try{ j=t?JSON.parse(t):null; }catch(e){} return { ok:res.ok, status:res.status, body:j }; });
+  });
+}
+function mfaEnter(){
+  mfaReset();
+  var lg=mfaEl('login'); if(lg) lg.style.display='none';
+  resolveTenantsThenEnter();
+}
+// ログイン・自動ログインの直後に呼ぶ。aal2 ならそのまま入口、そうでなければ二段階認証へ。
+function mfaAfterAuth(){
+  if(MFA_PURE.jwtAal(TOKEN)==='aal2'){ mfaEnter(); return; }
+  mfaBegin(false);
+}
+// ログインが切れた（401 等）。最初のメール・パスワードからやり直す。
+function mfaAuthLost(){
+  TOKEN=''; try{ clearSession(); }catch(e){}
+  mfaReset();
+  showLogin('ログインの有効期限が切れました。もう一度ログインしてください。');
+}
+// force=true：サーバーに拒否された時。aal を見ずに必ずコード入力／登録へ進む（入口との往復ループを防ぐ）。
+function mfaBegin(force){
+  if(!TOKEN){ mfaReset(); showLogin('もう一度ログインしてください。'); return; }
+  MFA.active=true; MFA.force=!!force; MFA.step='loading'; MFA.factorId=''; MFA.challengeId='';
+  var lg=mfaEl('login'); if(lg) lg.style.display='flex';
+  mfaStage(true);
+  mfaShow('mfaEnroll', false); mfaShow('mfaForm', false);
+  mfaText('mfaTitle','二段階認証'); mfaText('mfaLead','');
+  mfaMsg('確認中…'); mfaSetBusy(true);
+  mfaAuthFetch('GET','user').then(function(r){
+    if(!r.ok){ if(r.status===401||r.status===403) return mfaAuthLost(); throw new Error('user_failed'); }
+    var factors = r.body && r.body.factors;
+    var step = MFA_PURE.mfaNextStep({ aal: MFA.force ? null : MFA_PURE.jwtAal(TOKEN), factors: factors });
+    if(step==='enter'){ mfaEnter(); return; }
+    if(step==='challenge'){ mfaShowChallenge(MFA_PURE.pickVerifiedTotp(factors).id); return; }
+    return mfaEnroll(factors);
+  }).catch(function(){ mfaRetryable('通信エラーで確認できませんでした。電波の良い場所で「やり直す」を押してください。'); });
+}
+function mfaRetryable(msg){
+  MFA.step='retry'; mfaSetBusy(false);
+  var g=mfaEl('mfaGo'); if(g) g.textContent='やり直す';
+  mfaMsg(msg, true);
+}
+function mfaShowChallenge(factorId){
+  MFA.factorId=factorId; MFA.step='verify';
+  mfaText('mfaTitle','二段階認証');
+  mfaText('mfaLead','スマホの認証アプリに表示されている6桁のコードを入力してください。');
+  mfaShow('mfaEnroll', false); mfaShow('mfaForm', true);
+  var g=mfaEl('mfaGo'); if(g) g.textContent='確認してログイン';
+  mfaMsg(''); mfaSetBusy(false);
+  var c=mfaEl('mfaCode'); if(c){ c.value=''; c.focus(); }
+}
+// 初回登録：登録途中の古いものを消してから、新しく登録して QR と手入力用の文字を出す。
+function mfaEnroll(factors){
+  var chain=Promise.resolve();
+  MFA_PURE.unverifiedTotps(factors).forEach(function(f){
+    chain=chain.then(function(){ return mfaAuthFetch('DELETE','factors/'+encodeURIComponent(f.id)); });
+  });
+  return chain.then(function(){
+    return mfaAuthFetch('POST','factors',{ factor_type:'totp', friendly_name:'JISSO AI 管理画面' });
+  }).then(function(r){
+    if(!r.ok){ if(r.status===401) return mfaAuthLost(); throw new Error('enroll_failed'); }
+    var b=r.body||{}, totp=b.totp||{};
+    var qr=MFA_PURE.safeQrDataUri(totp.qr_code);
+    var secret=(typeof totp.secret==='string') ? totp.secret : '';
+    if(typeof b.id!=='string' || !b.id || (!qr && !secret)) throw new Error('enroll_invalid');
+    MFA.factorId=b.id; MFA.step='verify';
+    var q=mfaEl('mfaQr');
+    if(q){ if(qr){ q.src=qr; q.style.display='block'; } else { q.removeAttribute('src'); q.style.display='none'; } }
+    var se=mfaEl('mfaSecret'); if(se) se.textContent=secret;
+    mfaText('mfaTitle','認証アプリの登録（初回だけ）');
+    mfaText('mfaLead','スマホの認証アプリ（Google Authenticator、Microsoft Authenticator、iPhoneの『パスワード』など）でQRコードを読み取り、表示された6桁を入力してください');
+    mfaShow('mfaEnroll', true); mfaShow('mfaForm', true);
+    var g=mfaEl('mfaGo'); if(g) g.textContent='確認して登録';
+    mfaMsg(''); mfaSetBusy(false);
+    var c=mfaEl('mfaCode'); if(c){ c.value=''; c.focus(); }
+  });
+}
+// コードを確かめる。毎回新しい challenge を作るので、時間が経ってから入力しても期限切れになりにくい。
+function mfaVerify(){
+  if(MFA.busy) return;
+  if(MFA.step==='retry'){ mfaBegin(MFA.force); return; }
+  if(MFA.step!=='verify' || !MFA.factorId) return;
+  var c=mfaEl('mfaCode');
+  var code=MFA_PURE.normalizeTotpCode(c ? c.value : '');
+  if(!code){ mfaMsg('6桁の数字を入力してください。', true); return; }
+  mfaSetBusy(true); mfaMsg('確認中…');
+  var fid=encodeURIComponent(MFA.factorId);
+  mfaAuthFetch('POST','factors/'+fid+'/challenge',{}).then(function(r){
+    if(!r.ok || !r.body || typeof r.body.id!=='string') return r;
+    MFA.challengeId=r.body.id;
+    return mfaAuthFetch('POST','factors/'+fid+'/verify',{ challenge_id:r.body.id, code:code });
+  }).then(function(r){
+    if(!MFA.active) return; // 途中で「やめてログアウト」された
+    if(r.ok && r.body && r.body.access_token){
+      TOKEN=r.body.access_token;
+      saveSession(r.body);
+      mfaEnter();
+      return;
+    }
+    MFA.challengeId=''; mfaSetBusy(false);
+    var kind=MFA_PURE.mfaErrorKind(r.status, r.body);
+    if(kind==='auth'){ mfaAuthLost(); return; }
+    if(c){ c.value=''; c.focus(); }
+    if(kind==='invalid') mfaMsg('コードが違います。認証アプリに今表示されている6桁を入力してください。', true);
+    else if(kind==='expired') mfaMsg('コードの有効期限が切れました。認証アプリの新しい6桁を入力してください。', true);
+    else mfaMsg('確認できませんでした。少し時間をおいて、もう一度お試しください。', true);
+  }).catch(function(){
+    MFA.challengeId=''; mfaSetBusy(false);
+    mfaMsg('通信エラーで確認できませんでした。電波の良い場所でもう一度お試しください。', true);
+  });
+}
+// 「やめてログアウト」：サーバー側のログアウトも投げて（失敗しても続行）、最初の画面へ。
+function mfaCancel(){
+  if(TOKEN){ fetch(SB_URL+'/auth/v1/logout',{ method:'POST', headers:Object.assign({'Content-Type':'application/json'}, hdr()) }).catch(function(){}); }
+  TOKEN=''; try{ clearSession(); }catch(e){}
+  mfaReset();
+  var p=mfaEl('lp'); if(p) p.value='';
+  showLogin('ログアウトしました。');
+}
+// 通信の結果が「二段階認証が必要」なら、画面を閉じてコード入力へ戻し、呼び出し元へ投げるエラーを返す。
+function mfaCheckDenied(status, body){
+  if(!MFA_PURE.isMfaRequiredResponse(status, body)) return null;
+  mfaOnDenied();
+  var e=new Error('mfa_required'); e.code='mfa_required'; return e;
+}
+function mfaOnDenied(){
+  if(MFA.active) return; // すでにコード入力中（同時に複数の通信が拒否されても1回だけ）
+  try{
+    ['tenantHeader','headerLogoutBar','nav','subnav','consoleView'].forEach(function(id){ mfaShow(id, false); });
+    if(typeof hideAllViews==='function') hideAllViews();
+  }catch(e){}
+  mfaBegin(true);
+}
+(function(){
+  var g=mfaEl('mfaGo'); if(g) g.addEventListener('click', mfaVerify);
+  var o=mfaEl('mfaOut'); if(o) o.addEventListener('click', mfaCancel);
+  var c=mfaEl('mfaCode'); if(c) c.addEventListener('keydown', function(ev){ if(ev.key==='Enter') mfaVerify(); });
+})();
+/*<mfa-ui-end>*/
+
 // ===== ログイン画面の再表示（各タブのエラーフックから呼ばれる）=====
 function showLogin(msg){ handlingCloseManager(); chatSetFocus(false); chatClearImages(); var ov=document.getElementById("login"); if(ov) ov.style.display="flex"; var e=document.getElementById("lerr"); if(e&&msg) e.textContent=msg; }
 
@@ -4832,6 +5107,7 @@ async function doLogout(){
   // 2) トークン／ローカルセッションをクライアント側でも完全破棄。
   TOKEN = '';
   try { clearSession(); } catch (e) {}
+  try { mfaReset(); } catch (e) {} // 二段階認証の途中状態（factorId・challengeId・QR）も消す
   // 3) 画面初期化＝ヘッダ・ナビ・各ビューを隠す。
   try {
     var th = document.getElementById('tenantHeader'); if (th) th.style.display='none';
@@ -4856,9 +5132,9 @@ function login(){
       if(d&&d.access_token){
         TOKEN=d.access_token;
         saveSession(d); // ★リロードしても再ログイン不要にするため保存
-        document.getElementById("login").style.display="none";
-        // 扱えるテナントを確認 → 1件以下は自店直行／2件以上はコンソール（仁義）
-        resolveTenantsThenEnter();
+        err.textContent="";
+        // ★二段階認証：aal2 ならそのまま入口（扱えるテナントを確認）、aal1 ならコード入力／初回登録へ。
+        mfaAfterAuth();
       } else { err.textContent="ログインできませんでした（メール・パスワードをご確認ください）。"; }
     }).catch(function(e){ err.textContent="通信エラー："+(e&&e.message||e); });
 }
@@ -4891,7 +5167,10 @@ function resolveTenantsThenEnter(){
     if (MY_TENANTS.length >= 2){ showConsole(); return; }
     if (MY_TENANTS.length === 1) TENANT_ID = MY_TENANTS[0].tenant_id;
     enterDashboard(null);
-  }).catch(function(){ enterDashboard(null); });
+  }).catch(function(e){
+    if (e && e.code === 'mfa_required') return; // 二段階認証が必要＝データ画面に入らない（コード入力は mfaCheckDenied が開く）
+    enterDashboard(null);
+  });
 }
 /* 管理画面（子）を開く。tid 指定でその店に切り替え。 */
 function enterDashboard(tid){
@@ -5209,7 +5488,10 @@ function sbGet(path){
     path += (String(path).indexOf('?') === -1 ? '?' : '&') + 'tenant_id=eq.' + encodeURIComponent(TENANT_ID);
   }
   return fetch(SB_URL + '/rest/v1/' + path, { headers: hdr() })
-    .then(function(res){ return res.json().then(function(j){ if(!res.ok) throw new Error((j&&j.message)||('HTTP '+res.status)); return j; }); });
+    .then(function(res){ return res.text().then(function(t){ var j=null; try{ j=t?JSON.parse(t):null; }catch(e){}
+      if(!res.ok){ var me=mfaCheckDenied(res.status, j); if(me) throw me; throw new Error((j&&j.message)||('HTTP '+res.status)); }
+      if(j===null && t.trim()!=='null') throw new Error('HTTP '+res.status); // 空・壊れた本文（従来の res.json() と同じく失敗扱い）
+      return j; }); });
 }
 /* RPC POST。bodyはJSON。戻りは関数の戻り値（jsonb/void/uuid 等） */
 function sbRpc(fn, body){
@@ -5221,7 +5503,7 @@ function sbRpc(fn, body){
     // ★void を返すRPC(set_status/set_outcome/staff_cancel_reservation/save_artist_shifts 等)は
     //   本文が空(204)になる。res.json()だと空本文で例外→成功なのに失敗表示になるため text()で受ける。
     var j=null; try{ j=t?JSON.parse(t):null; }catch(e){}
-    if(!res.ok) throw new Error((j&&j.message)||t||('HTTP '+res.status));
+    if(!res.ok){ var me=mfaCheckDenied(res.status, j); if(me) throw me; throw new Error((j&&j.message)||t||('HTTP '+res.status)); }
     return j;
   }); });
 }
