@@ -4906,8 +4906,17 @@ function isMfaRequiredResponse(status, body) {
  return body.message === 'mfa_required' || body.reason === 'mfa_required' || body.error === 'mfa_required' || body.code === 'mfa_required';
 }
 // QRコードの画像URI：data:image/svg+xml で始まるものだけ許す。
+//   Supabase は SVG そのもの（先頭に "<?xml ...?>" とコメント、約36万文字）で返す（2026-10-28 本番で判明）。
+//   その場合は先頭の宣言・コメントを読み飛ばして <svg を確かめ、data URI に包む。
+//   img 要素の中の SVG はスクリプトを動かせないので、包んでも安全。
 function safeQrDataUri(uri) {
- return typeof uri === 'string' && /^data:image\/svg\+xml[;,]/.test(uri) ? uri : '';
+ if (typeof uri !== 'string') return '';
+ if (/^data:image\/svg\+xml[;,]/.test(uri)) return uri;
+ const svg = uri.trim();
+ if (svg.length > 1000000) return '';
+ const body = svg.replace(/^(?:<\?xml[^>]*\?>\s*|<!--[\s\S]*?-->\s*|<!DOCTYPE[^>]*>\s*)*/i, '');
+ if (/^<svg[\s>]/i.test(body)) return 'data:image/svg+xml;utf-8,' + encodeURIComponent(svg);
+ return '';
 }
 // 認証の失敗理由：'invalid'＝コード違い／'expired'＝期限切れ／'auth'＝ログイン切れ／'other'。
 function mfaErrorKind(status, body) {
