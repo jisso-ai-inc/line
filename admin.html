@@ -1100,16 +1100,29 @@ body{background:var(--j-bg)!important;color:var(--j-text);font-family:"Hiragino 
 .jd-empty{color:var(--j-muted);font-size:13px;padding:14px 0}
 /* JISSO AI：開催日程カード（日程はルールで自動。変更は管理者だけ・理由つき） */
 .jd-sess-list .m b,.jd-sess-list .m span{white-space:normal;overflow:visible;text-overflow:clip}
-.jd-sess-note{display:block;font-size:12px;color:#334155;margin-top:3px;white-space:normal;line-height:1.5}
-.jd-sess-note.why{color:#B45309}
-.jd-sess-pills{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.jd-sess-list .m .jd-sess-note{display:block;font-size:12px;color:#334155;margin-top:3px;white-space:normal;line-height:1.5}
+.jd-sess-list .m .jd-sess-note.why{color:#B45309}
+.jd-sess-list .it{transition:background-color .8s ease-out,box-shadow .8s ease-out}
+.jd-sess-list .it.jd-sess-hit{background:#FFF7E0;box-shadow:0 0 0 6px #FFF7E0;border-radius:4px}
+.jd-sess-hint{font-size:12px;font-weight:400;color:var(--j-muted);line-height:1.5}
+.jd-sess-form [aria-invalid="true"]{border-color:#B91C1C;background:#FFF8F8}
+.jd-sess-form select:disabled{color:var(--j-muted);background:#F5F7FA}
+.jd-btn:disabled{background:#94A3B8;cursor:not-allowed}
+.jd-sess-pills{display:flex;flex-direction:column;align-items:stretch;gap:4px;flex:0 0 auto}
+.jd-sess-pills .jd-pill{text-align:center}
+.jd-sess-list .pill-gray{color:#475569}
 .jd-sess-warn{background:#FEF3E2;color:#92400E;border-radius:10px;padding:10px 12px;font-size:12.5px;line-height:1.6;margin-bottom:10px}
 .jd-sess-foot{font-size:12px;color:var(--j-muted);margin-top:10px;line-height:1.6}
 .jd-sess-edit{margin-top:12px;border-top:1px solid var(--j-line);padding-top:10px}
-.jd-sess-edit summary{cursor:pointer;font-size:13px;font-weight:800;color:var(--j-blue)}
+.jd-sess-edit summary{cursor:pointer;font-size:13px;font-weight:800;color:var(--j-blue);padding:8px 0;border-radius:6px}
+.jd-sess-edit summary:focus-visible,.jd-sess-form .jd-btn:focus-visible{outline:2px solid var(--j-blue);outline-offset:2px}
 .jd-sess-form{display:grid;gap:10px;margin-top:10px}
 .jd-sess-form label{display:grid;gap:4px;font-size:12.5px;font-weight:700;color:var(--j-navy)}
-.jd-sess-form select,.jd-sess-form input{font:inherit;font-size:14px;border:1px solid var(--j-line);border-radius:8px;padding:8px 10px;min-width:0;width:100%;box-sizing:border-box}
+.jd-sess-form select,.jd-sess-form input{font:inherit;font-size:14px;border:1px solid var(--j-line);border-radius:8px;padding:8px 10px;min-width:0;width:100%;box-sizing:border-box;min-height:40px;background-color:#fff;color:var(--j-navy);font-weight:400}
+.jd-sess-form select:focus,.jd-sess-form input:focus{outline:none;border-color:var(--j-blue);box-shadow:0 0 0 3px rgba(30,111,230,.15)}
+.jd-sess-form [aria-invalid="true"]:focus{border-color:#B91C1C;box-shadow:0 0 0 3px rgba(185,28,28,.15)}
+.jd-sess-form .jd-btn{min-height:40px}
+@media (max-width:560px){ .jd-sess-edit summary{padding:12px 0} .jd-sess-form select,.jd-sess-form input,.jd-sess-form .jd-btn{min-height:44px;font-size:16px} .jd-sess-form .jd-btn{width:100%} }
 .jd-sess-msg{font-size:12.5px;line-height:1.5}
 .jd-sess-msg.ng{color:#B91C1C} .jd-sess-msg.ok{color:#15803D}
 /* ログイン */
@@ -3596,7 +3609,7 @@ function loadHome(){
     +'</div><div>'
     +  '<div class="jd-card" style="margin-bottom:20px"><div class="jd-ttl"><h3>開催日程</h3></div>'
     +    '<div id="jdSessWarn"></div><div class="jd-list jd-sess-list" id="jdSess"><div class="jd-empty">読み込み中…</div></div>'
-    +    '<p class="jd-sess-foot">日程はルール（第2・第4の火曜とその翌日、祝日の回は休み）から毎日自動で更新されます。LINEメニューB・問い合わせフォーム・HPに同じ日程が出ます。</p>'
+    +    '<p class="jd-sess-foot">日程はルール（第2・第4の火曜とその翌日、祝日の回は休み）から毎日自動で更新されます。いまはこの画面で確かめるための表示です。LINEメニューBと問い合わせフォームは、まだ別の設定から日程を出しています（この表への切り替えとHPへの連携は準備中）。</p>'
     +    '<div id="jdSessAdmin"></div></div>'
     +  '<div class="jd-card" style="margin-bottom:20px"><div class="jd-ttl"><h3>これから送る申込後の連絡</h3><button class="jd-more" onclick="gotoSubtab(\'resv\',\'showInquiries\')">すべて見る ›</button></div>'
     +    '<div class="jd-list" id="jdSteps"><div class="jd-empty">読み込み中…</div></div></div>'
@@ -3764,6 +3777,60 @@ var JD_SESS_ERR={
   session_not_found:'その日の回が見つかりません（休止できるのは公開中の回、戻せるのは休止中の回です）。',
   invalid_date:'日付を選んでください。'
 };
+// 変更欄の選び方・日付の下限・成功の文（poc/_pure.mjs と同一）
+function jdSessChoices(items, action, today){
+  var ok={ hide:function(it){ return it.status==='published'; }, restore:function(it){ return it.status==='hidden'; }, note:function(){ return true; } }[action];
+  var EMPTY={ hide:'休止できる回はありません（これから始まる公開中の回が対象です）。', restore:'戻せる回はありません（休止中の回が対象です）。', note:'備考を変えられる回はありません。' };
+  if(!ok) return { list:[], empty:'' };
+  var list=(Array.isArray(items)?items:[]).filter(function(it){ return it&&typeof it.start==='string'&&it.start>today&&ok(it); })
+    .map(function(it){ var t=String(it.title||it.start), m=/^(\d{4})年 (.+)$/.exec(t);
+      return { start:it.start, title:t, year:m?m[1]+'年':'', short:m?m[2]:t }; });
+  return { list:list, empty:list.length?'':EMPTY[action] };
+}
+function jdSessMinDate(today){
+  var a=String(today||'').split('-'), y=+a[0], m=+a[1], d=+a[2];
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(String(today||''))||!y||!m||!d) return '';
+  function iso(t){ return new Date(t).toISOString().slice(0,10); }
+  function minus2(s){ var b=s.split('-'), yy=+b[0], mm=+b[1]-2, dd=+b[2]; if(mm<1){ mm+=12; yy--; }
+    return iso(Date.UTC(yy,mm-1,Math.min(dd,new Date(Date.UTC(yy,mm,0)).getUTCDate()))); }
+  var t=Date.UTC(y,m-1,d)+55*864e5;
+  for(var i=0;i<15;i++){ var s=iso(t+i*864e5); if(minus2(s)>=today) return s; }
+  return '';
+}
+function jdSessDone(action, start){
+  var DOW=['日','月','火','水','木','金','土'], a=String(start||'').split('-');
+  var w=DOW[new Date(Date.UTC(+a[0],+a[1]-1,+a[2])).getUTCDay()];
+  var label=w?(+a[1])+'/'+(+a[2])+'（'+w+'）':String(start||'');
+  return ({ hide:label+'の回を休止しました。', restore:label+'の回を公開に戻しました。', note:label+'の回の備考を変えました。', add:label+'からの特別な回を追加しました。' })[action]||'変更しました。';
+}
+// 確認画面の文面（poc/_pure.mjs と同一）
+function jdSessLabel(start){
+  var DOW=['日','月','火','水','木','金','土'], a=String(start||'').split('-');
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(String(start||''))) return String(start||'');
+  var t=Date.UTC(+a[0],+a[1]-1,+a[2]), e=new Date(t+864e5);
+  return (+a[0])+'年 '+(+a[1])+'/'+(+a[2])+'（'+DOW[new Date(t).getUTCDay()]+'）・'+(e.getUTCMonth()+1)+'/'+e.getUTCDate()+'（'+DOW[e.getUTCDay()]+'）';
+}
+function jdSessApplicants(rows, start){
+  var seen={};
+  (Array.isArray(rows)?rows:[]).forEach(function(r){ if(r&&r.training_start===start&&r.status!=='cancelled'&&r.customer_id) seen[r.customer_id]=1; });
+  return Object.keys(seen).length;
+}
+function jdSessConfirm(action, start, count, reason, note){
+  var label=jdSessLabel(start);
+  var where='いまはこの画面の日程だけが変わります。LINEメニューBと問い合わせフォームの日程は別の設定から出しているため、そちらは変わりません。';
+  var why='理由：'+String(reason||'');
+  if(action==='hide'){
+    var who=count===null||count===undefined
+      ? '申込済みの方の人数を確かめられませんでした。「問い合わせ」の画面で、この回の申込がないか確かめてから進めてください。'
+      : (count>0 ? 'この回に申込済みの方が'+count+'名います。申込後の連絡（受講料のお振込み・前日の案内など）は自動では取り消されません。個別にご連絡ください。'
+                 : 'この回に申込済みの方はいません。');
+    return { title:label+'の回を休止しますか？', body:who+'\n\n'+where+'\n'+why, ok:'休止する', danger:true };
+  }
+  if(action==='restore') return { title:label+'の回を公開に戻しますか？', body:where+'\n'+why, ok:'公開に戻す', danger:false };
+  if(action==='note') return { title:label+'の回の備考を変えますか？', body:'新しい備考：'+(note?String(note):'（備考なし）')+'\n\n'+where+'\n'+why, ok:'備考を変える', danger:false };
+  if(action==='add') return { title:label+'を特別な回として追加しますか？', body:'ルール（第2・第4の火曜）の外の日です。追加した回は自動では消えません。\n\n'+where+'\n'+why, ok:'追加する', danger:false };
+  return { title:'開催日程を変更しますか？', body:why, ok:'変更する', danger:false };
+}
 function jdTodayJst(){ return new Date(Date.now()+9*3600*1000).toISOString().slice(0,10); }
 function jdLoadSessions(ok){
   var today=jdTodayJst();
@@ -3772,7 +3839,7 @@ function jdLoadSessions(ok){
     var v=jdSessionView(rows, today);
     jdSetHtml('jdSessWarn', v.warn?'<div class="jd-sess-warn">'+esc(v.warn)+'</div>':'');
     var h=v.items.map(function(it){
-      return '<div class="it"><div class="m"><b>'+esc(it.title)+'</b><span>'+esc(it.sub)+'</span>'
+      return '<div class="it'+(JD.sessHit===it.start?' jd-sess-hit':'')+'" data-start="'+esc(it.start)+'"><div class="m"><b>'+esc(it.title)+'</b><span>'+esc(it.sub)+'</span>'
         +(it.note?'<span class="jd-sess-note">備考：'+esc(it.note)+'</span>':'')
         +(it.reason?'<span class="jd-sess-note why">'+(it.status==='hidden'?'休止の理由：':'特別な回の理由：')+esc(it.reason)+'</span>':'')
         +'</div><div class="jd-sess-pills"><span class="jd-pill '+esc(it.pill.cls)+'">'+esc(it.pill.text)+'</span>'
@@ -3786,51 +3853,103 @@ function jdLoadSessions(ok){
 function jdSessAdminForm(items){
   var host=document.getElementById('jdSessAdmin'); if(!host) return;
   if(window.IS_MANAGER!==true){ host.innerHTML=''; return; }
-  var opts=(items||[]).map(function(it){ return '<option value="'+esc(it.start)+'">'+esc(it.title)+(it.status==='hidden'?'（休止中）':'')+'</option>'; }).join('');
-  host.innerHTML='<details class="jd-sess-edit"><summary>日程を変更する（管理者のみ）</summary>'
-    +'<div class="jd-sess-form">'
-    +'<label>やること<select id="jdSessAct">'
-    +  '<option value="hide">この回を休止する</option><option value="restore">休止した回を戻す</option>'
-    +  '<option value="note">備考を変える</option><option value="add">特別な回を追加する（ルール外の日）</option></select></label>'
-    +'<label id="jdSessPickWrap">対象の回<select id="jdSessPick">'+opts+'</select></label>'
-    +'<label id="jdSessDateWrap" style="display:none">追加する回の1日目<input id="jdSessDate" type="date"></label>'
-    +'<label id="jdSessNoteWrap" style="display:none">備考<select id="jdSessNote"><option value="">（備考なし）</option>'
-    +  JD_SESS_NOTES.map(function(n){ return '<option value="'+esc(n)+'">'+esc(n)+'</option>'; }).join('')+'</select></label>'
-    +'<label>理由（必ず入れる・記録に残ります）<input id="jdSessReason" type="text" maxlength="200" placeholder="例：会場が取れないため"></label>'
-    +'<div><button type="button" class="jd-btn" id="jdSessGo">変更する</button></div>'
-    +'<div class="jd-sess-msg" id="jdSessMsg" role="status"></div>'
-    +'</div></details>';
-  var act=document.getElementById('jdSessAct');
-  act.addEventListener('change', jdSessSyncForm);
-  document.getElementById('jdSessGo').addEventListener('click', jdSessSubmit);
+  JD.sessItems=items||[];
+  // すでに欄があれば作り直さない（開いた状態・入力・結果の文を残す）。選べる回だけ更新する。
+  if(!document.getElementById('jdSessAct')){
+    host.innerHTML='<details class="jd-sess-edit"><summary>日程を変更する（管理者のみ）</summary>'
+      +'<div class="jd-sess-form">'
+      +'<label>やること<select id="jdSessAct">'
+      +  '<option value="hide">この回を休止する</option><option value="restore">休止した回を戻す</option>'
+      +  '<option value="note">備考を変える</option><option value="add">特別な回を追加する（ルール外の日）</option></select></label>'
+      +'<label id="jdSessPickWrap">対象の回<select id="jdSessPick"></select></label>'
+      +'<label id="jdSessDateWrap" style="display:none">追加する回の1日目<input id="jdSessDate" type="date"><span class="jd-sess-hint" id="jdSessDateHint"></span></label>'
+      +'<label id="jdSessNoteWrap" style="display:none">備考<select id="jdSessNote"><option value="">（備考なし）</option>'
+      +  JD_SESS_NOTES.map(function(n){ return '<option value="'+esc(n)+'">'+esc(n)+'</option>'; }).join('')+'</select></label>'
+      +'<label>理由（必ず入れる・記録に残ります）<input id="jdSessReason" type="text" maxlength="200" placeholder="例：会場が取れないため"></label>'
+      +'<div><button type="button" class="jd-btn" id="jdSessGo">変更する</button></div>'
+      +'<div class="jd-sess-msg" id="jdSessMsg" role="status" aria-live="polite"></div>'
+      +'</div></details>';
+    document.getElementById('jdSessAct').addEventListener('change', function(){ jdSessClearMsg(); jdSessSyncForm(); });
+    ['jdSessReason','jdSessDate','jdSessPick'].forEach(function(id){
+      document.getElementById(id).addEventListener('input', function(){ jdSessMark(null); });
+    });
+    document.getElementById('jdSessGo').addEventListener('click', jdSessSubmit);
+  }
   jdSessSyncForm();
 }
 function jdSessSyncForm(){
-  var a=(document.getElementById('jdSessAct')||{}).value;
+  var a=(document.getElementById('jdSessAct')||{}).value; if(!a) return;
   var show=function(id,on){ var el=document.getElementById(id); if(el) el.style.display=on?'grid':'none'; };
   show('jdSessPickWrap', a!=='add'); show('jdSessDateWrap', a==='add'); show('jdSessNoteWrap', a==='note');
+  var pick=document.getElementById('jdSessPick'), go=document.getElementById('jdSessGo');
+  var prev=pick.value, c=jdSessChoices(JD.sessItems, a, jdTodayJst());
+  pick.innerHTML=c.list.length
+    ? c.list.reduce(function(h,x,i,l){ // 年ごとにまとめ、欄の中は月日だけ（スマホ幅でも切れない）
+        if(!i||l[i-1].year!==x.year) h+=(i?'</optgroup>':'')+'<optgroup label="'+esc(x.year)+'">';
+        return h+'<option value="'+esc(x.start)+'">'+esc(x.short)+'</option>'+(i===l.length-1?'</optgroup>':'');
+      },'')
+    : '<option value="">'+esc(c.empty)+'</option>';
+  pick.disabled=!c.list.length;
+  if(c.list.some(function(x){ return x.start===prev; })) pick.value=prev;
+  var min=jdSessMinDate(jdTodayJst()), date=document.getElementById('jdSessDate');
+  date.min=min;
+  document.getElementById('jdSessDateHint').textContent=min?'申込期限（2か月前）が過ぎていない日だけ選べます。'+min.replace(/^(\d+)-0?(\d+)-0?(\d+)$/,'$1年$2月$3日')+'以降。':'';
+  go.disabled=(a!=='add'&&!c.list.length);
+}
+// エラーを出した欄に印をつけ、文とつなげる（読み上げでも分かるように）
+function jdSessMark(id){
+  ['jdSessPick','jdSessDate','jdSessReason'].forEach(function(x){
+    var el=document.getElementById(x); if(!el) return;
+    if(x===id){ el.setAttribute('aria-invalid','true'); el.setAttribute('aria-describedby','jdSessMsg'); }
+    else { el.removeAttribute('aria-invalid'); el.removeAttribute('aria-describedby'); }
+  });
+}
+function jdSessClearMsg(){
+  var msg=document.getElementById('jdSessMsg'); if(msg){ msg.textContent=''; msg.className='jd-sess-msg'; }
+  jdSessMark(null);
 }
 function jdSessSubmit(){
   var a=document.getElementById('jdSessAct').value;
   var start=a==='add'?document.getElementById('jdSessDate').value:document.getElementById('jdSessPick').value;
-  var reason=document.getElementById('jdSessReason').value.trim();
+  var reasonEl=document.getElementById('jdSessReason'), reason=reasonEl.value.trim();
   var note=a==='note'?document.getElementById('jdSessNote').value:null;
   var msg=document.getElementById('jdSessMsg'), btn=document.getElementById('jdSessGo');
   var say=function(t,okk){ msg.textContent=t; msg.className='jd-sess-msg '+(okk?'ok':'ng'); };
-  if(!start){ say(JD_SESS_ERR.invalid_date); return; }
-  if(!reason||reason.length>200||/[<>]/.test(reason)){ say(JD_SESS_ERR.reason_required); return; }
-  var what={hide:'休止します',restore:'休止を戻します',note:'備考を変えます',add:'特別な回として追加します'}[a]||'';
-  askConfirm({ title:'開催日程を変更しますか？',
-    body:start+' の回を'+what+'。LINEメニューB・問い合わせフォーム・HPに出る日程が変わります。理由：'+reason,
-    ok:'変更する' }).then(function(yes){
+  var fail=function(t,id){ say(t,false); jdSessMark(id); var el=id&&document.getElementById(id); if(el) el.focus(); };
+  var dateId=a==='add'?'jdSessDate':'jdSessPick';
+  jdSessMark(null);
+  if(!start){ fail(a==='add'?JD_SESS_ERR.invalid_date:'対象の回を選んでください。', dateId); return; }
+  if(a==='add'){
+    var min=jdSessMinDate(jdTodayJst());
+    if(min&&start<min){ fail(JD_SESS_ERR.deadline_passed, dateId); return; }
+    if((JD.sessItems||[]).some(function(it){ return it.start===start; })){ fail(JD_SESS_ERR.already_exists, dateId); return; }
+  }
+  if(!reason||reason.length>200||/[<>]/.test(reason)){ fail(JD_SESS_ERR.reason_required,'jdSessReason'); return; }
+  // 休止のときは、この回の申込済みの人数を先に数えて確認画面に出す（数えられなければ、その旨を出す）
+  var count=a!=='hide'?Promise.resolve(0)
+    :sbGet('jisso_step_schedule?select=customer_id,training_start,status&training_start=eq.'+encodeURIComponent(start)+(TENANT_ID?'&tenant_id=eq.'+encodeURIComponent(TENANT_ID):'')+'&limit=1000')
+      .then(function(rows){ return jdSessApplicants(rows, start); }).catch(function(){ return null; });
+  btn.disabled=true;
+  count.then(function(n){
+    btn.disabled=false;
+    var c=jdSessConfirm(a, start, n, reason, note);
+    return askConfirm({ title:c.title, body:c.body, ok:c.ok, cancel:'やめる', danger:c.danger });
+  }).then(function(yes){
     if(!yes) return;
     btn.disabled=true; say('変更しています…', true);
     sbRpc('jisso_session_change',{ p_tenant:TENANT_ID, p_action:a, p_start:start, p_reason:reason, p_note:note }).then(function(){
-      btn.disabled=false; say('変更しました。', true); jdLoadSessions();
+      btn.disabled=false; reasonEl.value=''; if(a==='add') document.getElementById('jdSessDate').value='';
+      say(jdSessDone(a, start), true);
+      // 変えた行を数秒だけ目立たせる
+      JD.sessHit=start; jdLoadSessions();
+      clearTimeout(JD.sessHitTimer);
+      JD.sessHitTimer=setTimeout(function(){ JD.sessHit=null; var r=document.querySelector('#jdSess .jd-sess-hit'); if(r) r.classList.remove('jd-sess-hit'); }, 4000);
     }).catch(function(e){
       btn.disabled=false;
       var m=String((e&&e.message)||''), k=Object.keys(JD_SESS_ERR).filter(function(x){ return m.indexOf(x)>=0; })[0];
-      say(k?JD_SESS_ERR[k]:'変更できませんでした。時間をおいてもう一度お試しください。');
+      var field=(k==='reason_required')?'jdSessReason':((k==='deadline_passed'||k==='already_exists'||k==='session_not_found'||k==='invalid_date')?dateId:null);
+      fail(k?JD_SESS_ERR[k]:'変更できませんでした。通信を確かめて、もう一度お試しください。', field);
+      if(k==='session_not_found') jdLoadSessions();
     });
   });
 }
