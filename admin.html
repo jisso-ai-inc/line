@@ -1253,7 +1253,16 @@ body{background:var(--j-bg)!important;color:var(--j-text);font-family:"Hiragino 
 #usersView .lop-how summary{cursor:pointer;font-weight:700;color:var(--j-navy)}
 #usersView .lop-how summary:focus-visible{outline:2px solid var(--j-blue);outline-offset:3px;border-radius:4px}
 #usersView .lop-how ol{margin:10px 0 0;padding-left:1.4em;line-height:1.8}
-#usersView .lop-list{margin-top:22px;border-top:1px solid #F0F4FA}
+#usersView .lop-list{margin:4px 0 20px;border-top:1px solid #F0F4FA}
+#usersView .lop-msg{margin:0 0 6px;min-height:0}
+#usersView .lop-manual{margin:0}
+#usersView .lop-manual[open] summary{margin-bottom:12px}
+#usersView .lop-note{margin:0 0 6px;font-size:13px;color:#475569}
+#usersView .lop-manual .us-two{margin-top:16px}
+#usersView .lop-manual .usr-addbtn{margin:4px 0 4px 56px}
+#usersView .lop-row.lop-wait{background:#FFFBEB;margin:0 -12px;padding:12px;border-radius:10px}
+#usersView .lop-row.lop-wait .lop-st{background:#FEF3C7;color:#92400E}
+#usersView .lop-acts{display:flex;gap:8px;flex:0 0 auto}
 #usersView .lop-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #F0F4FA;min-width:0}
 #usersView .lop-row.lop-off .ur-id{opacity:.55}
 #usersView .lop-st{flex:0 0 auto;font-size:12px;font-weight:700;border-radius:6px;padding:3px 9px;background:#E7F6EC;color:#15803D}
@@ -1868,27 +1877,28 @@ body{background:var(--j-bg)!important;color:var(--j-text);font-family:"Hiragino 
       </section>
       <section class="us-card" id="lopCard">
         <div class="us-step"><span>3</span><h3>LINEで操作できる人</h3><span class="usr-count" id="lopCount"></span></div>
-        <p class="lop-lead">スタッフグループで「完了 番号」や「✅ 対応完了にする」ボタンを使える人です。ここに登録していない人が送っても、何も起きません。</p>
-        <details class="lop-how">
-          <summary>LINEの番号の調べ方</summary>
+        <p class="lop-lead">スタッフグループで「完了 番号」や「✅ 対応完了にする」ボタンを使える人です。スタッフグループに新しく人を追加すると、ここに「承認待ち」で出ます。「承認」を押すと使えるようになります。グループから抜けた人は自動で止まります。</p>
+        <div class="usr-msg lop-msg" id="lopMsg" role="status"></div>
+        <div id="lopList" class="lop-list"><div class="placeholder">読み込み中…</div></div>
+        <details class="lop-how lop-manual">
+          <summary>番号を手で入れて登録する（予備）</summary>
+          <p class="lop-note">前からグループにいる人など、「承認待ち」に出てこない人はここから登録します。</p>
           <ol>
             <li>LINEで、本人と「JISSO AI」公式アカウントだけの新しいグループを作ります。</li>
             <li>そのグループで「グループID」と送ります。</li>
             <li>返事の「送った方のIDです」の下にある、U から始まる番号をコピーします（返事をまるごと貼っても大丈夫です）。</li>
             <li>確かめ終わったら、そのグループは退会してかまいません。</li>
           </ol>
+          <div class="us-two">
+            <div class="us-field"><i><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></i><div>
+              <label for="lopName">名前<em>必須</em></label>
+              <input id="lopName" type="text" placeholder="山田 花子" autocomplete="off" maxlength="40"></div></div>
+            <div class="us-field"><i><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6M9 11h6M9 15h3"/></svg></i><div>
+              <label for="lopId">LINEの番号<em>必須</em></label>
+              <input id="lopId" type="text" placeholder="U から始まる33文字" autocomplete="off" spellcheck="false"></div></div>
+          </div>
+          <button type="button" class="usr-addbtn" id="lopAddBtn">LINEで操作できる人に追加</button>
         </details>
-        <div class="us-two">
-          <div class="us-field"><i><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></i><div>
-            <label for="lopName">名前<em>必須</em></label>
-            <input id="lopName" type="text" placeholder="山田 花子" autocomplete="off" maxlength="40"></div></div>
-          <div class="us-field"><i><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6M9 11h6M9 15h3"/></svg></i><div>
-            <label for="lopId">LINEの番号<em>必須</em></label>
-            <input id="lopId" type="text" placeholder="U から始まる33文字" autocomplete="off" spellcheck="false"></div></div>
-        </div>
-        <div class="usr-msg" id="lopMsg" role="status"></div>
-        <button type="button" class="usr-addbtn" id="lopAddBtn">LINEで操作できる人に追加</button>
-        <div id="lopList" class="lop-list"><div class="placeholder">読み込み中…</div></div>
       </section>
     </div>
     <aside class="us-card us-side">
@@ -13377,11 +13387,20 @@ function lineOpLabel(input) {
  if (typeof input !== 'string') return '';
  return input.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 40);
 }
-// 有効な人を先に、同じなら登録した順。元の配列は変えない。
+// 状態：'pending'（承認待ち）／'active'（使える）／'left'（グループから抜けて止まった）／'stopped'（止めた・見送った）。
+function lineOpState(row) {
+ if (!row || typeof row !== 'object') return 'stopped';
+ if (row.pending === true && row.is_active !== true) return 'pending';
+ if (row.is_active === true) return 'active';
+ return row.left_group_at ? 'left' : 'stopped';
+}
+// 承認待ち → 使える → 止まっている人の順。同じなら登録した順。元の配列は変えない。
 function lineOpSort(rows) {
  if (!Array.isArray(rows)) return [];
+ const rank = { pending: 0, active: 1, left: 2, stopped: 2 };
  return rows.filter((r) => r && typeof r === 'object').slice().sort((a, b) => {
-  if (!!a.is_active !== !!b.is_active) return a.is_active ? -1 : 1;
+  const d = rank[lineOpState(a)] - rank[lineOpState(b)];
+  if (d) return d;
   return String(a.created_at || '').localeCompare(String(b.created_at || ''));
  });
 }
@@ -13395,7 +13414,7 @@ function lineOpErrorText(err) {
  return '保存できませんでした。画面を再読み込みして確認してください。';
 }
 /*</lineop-pure>*/
-return {lineOpPickId:lineOpPickId,lineOpMask:lineOpMask,lineOpLabel:lineOpLabel,lineOpSort:lineOpSort,lineOpErrorText:lineOpErrorText};
+return {lineOpPickId:lineOpPickId,lineOpMask:lineOpMask,lineOpLabel:lineOpLabel,lineOpState:lineOpState,lineOpSort:lineOpSort,lineOpErrorText:lineOpErrorText};
 })();
 var LOP_SEQ=0, LOP_BUSY=false;
 function lopMsg(t, ok){ var e=document.getElementById('lopMsg'); if(!e) return; e.textContent=t||''; e.style.color= ok===true ? '#15803D' : ok===false ? '#B91C1C' : '#475569'; }
@@ -13403,22 +13422,31 @@ function loadLineOperators(){
   var list=document.getElementById('lopList'); if(!list) return Promise.resolve();
   var tenant=TENANT_ID, seq=++LOP_SEQ;
   if(!tenant){ list.innerHTML='<div class="placeholder">店が選ばれていません。</div>'; return Promise.resolve(); }
-  return sbGet('staff_line_operators?select=line_user_id,label,is_active,created_at&tenant_id=eq.'+encodeURIComponent(tenant)+'&order=created_at.asc')
+  return sbGet('staff_line_operators?select=line_user_id,label,is_active,pending,left_group_at,created_at&tenant_id=eq.'+encodeURIComponent(tenant)+'&order=created_at.asc')
     .then(function(rows){ if(tenant!==TENANT_ID||seq!==LOP_SEQ) return; renderLineOperators(rows||[]); })
     .catch(function(err){ if(tenant!==TENANT_ID||seq!==LOP_SEQ) return; list.innerHTML='<div class="placeholder">取得できませんでした<br>'+esc(LOP_PURE.lineOpErrorText(err))+'</div>'; });
 }
 function renderLineOperators(rows){
   var list=document.getElementById('lopList'), cnt=document.getElementById('lopCount'); if(!list) return;
-  var sorted=LOP_PURE.lineOpSort(rows), active=sorted.filter(function(r){return r.is_active;}).length;
-  if(cnt) cnt.textContent = active+'名';
-  if(!sorted.length){ list.innerHTML='<div class="placeholder">まだ誰も登録されていません。登録するまで、LINEからは誰も「完了」にできません。</div>'; return; }
+  var sorted=LOP_PURE.lineOpSort(rows);
+  var active=sorted.filter(function(r){return LOP_PURE.lineOpState(r)==='active';}).length;
+  var waiting=sorted.filter(function(r){return LOP_PURE.lineOpState(r)==='pending';}).length;
+  if(cnt) cnt.textContent = active+'名'+(waiting?'・承認待ち '+waiting+'名':'');
+  if(!sorted.length){ list.innerHTML='<div class="placeholder">まだ誰もいません。スタッフグループに人を追加すると、ここに「承認待ち」で出ます。</div>'; return; }
+  var ST={ pending:'承認待ち', active:'使える', left:'グループから抜けました', stopped:'停止中' };
   list.innerHTML = sorted.map(function(r){
-    var name=LOP_PURE.lineOpLabel(r.label)||'（名前なし）', on=!!r.is_active;
-    return '<div class="lop-row'+(on?'':' lop-off')+'">'
+    var st=LOP_PURE.lineOpState(r), name=LOP_PURE.lineOpLabel(r.label)||'（名前なし）';
+    var data=' data-lop-id="'+esc(r.line_user_id)+'" data-lop-name="'+esc(name)+'"';
+    var acts = st==='pending'
+      ? '<button type="button" class="usr-btn usr-primary" data-lop-act="on"'+data+'>承認</button><button type="button" class="usr-btn" data-lop-act="off"'+data+'>見送る</button>'
+      : st==='active'
+        ? '<button type="button" class="usr-btn usr-danger" data-lop-act="off"'+data+'>止める</button>'
+        : '<button type="button" class="usr-btn" data-lop-act="on"'+data+'>再開する</button>';
+    return '<div class="lop-row'+(st==='pending'?' lop-wait':st==='active'?'':' lop-off')+'">'
       + '<div class="ur-av" aria-hidden="true">'+esc(name.charAt(0))+'</div>'
       + '<div class="ur-id"><b>'+esc(name)+'</b><span>'+esc(LOP_PURE.lineOpMask(r.line_user_id))+'</span></div>'
-      + '<span class="lop-st">'+(on?'使える':'停止中')+'</span>'
-      + '<button type="button" class="usr-btn'+(on?' usr-danger':'')+'" data-lop-act="'+(on?'off':'on')+'" data-lop-id="'+esc(r.line_user_id)+'" data-lop-name="'+esc(name)+'">'+(on?'止める':'再開する')+'</button>'
+      + '<span class="lop-st">'+esc(ST[st])+'</span>'
+      + '<div class="lop-acts">'+acts+'</div>'
       + '</div>';
   }).join('');
 }
@@ -13443,11 +13471,14 @@ function lopAdd(){
 function lopToggle(btn){
   if(LOP_BUSY) return;
   var id=btn.getAttribute('data-lop-id'), on=btn.getAttribute('data-lop-act')==='on', name=btn.getAttribute('data-lop-name')||'';
+  var label=btn.textContent;
   if(!LOP_PURE.lineOpPickId(id)) return;
-  var tenant=TENANT_ID; LOP_BUSY=true; btn.disabled=true; lopMsg(on?'再開しています…':'止めています…');
+  var tenant=TENANT_ID; LOP_BUSY=true; btn.disabled=true; lopMsg('保存しています…');
   lopSave(id, '', on).then(function(){
     if(tenant!==TENANT_ID) return;
-    lopMsg(on ? name+' さんを再開しました。' : name+' さんを止めました。LINEからの「完了」は無視されます。', true);
+    lopMsg(label==='承認' ? name+' さんを承認しました。スタッフグループで「完了 番号」が使えます。'
+         : label==='見送る' ? name+' さんを見送りました。LINEからの「完了」は無視されます。'
+         : on ? name+' さんを再開しました。' : name+' さんを止めました。LINEからの「完了」は無視されます。', true);
     return loadLineOperators();
   }).catch(function(err){ if(tenant===TENANT_ID) lopMsg(LOP_PURE.lineOpErrorText(err), false); })
     .then(function(){ LOP_BUSY=false; btn.disabled=false; });
