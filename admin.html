@@ -1248,6 +1248,19 @@ body{background:var(--j-bg)!important;color:var(--j-text);font-family:"Hiragino 
 #usersView .usr-btn{height:36px;padding:0 14px;border-radius:8px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;border:1px solid #D5DEEC;background:#fff;color:#334155}
 #usersView .usr-btn.usr-primary{background:var(--j-blue);border-color:var(--j-blue);color:#fff}
 #usersView .usr-btn.usr-danger{color:#B91C1C;border-color:#F3C4C4;background:#fff}
+/* LINEで操作できる人（スタッフグループの「完了」を使える人） */
+#usersView .lop-lead{margin:-8px 0 14px;font-size:13.5px;line-height:1.75;color:#334155}
+#usersView .lop-how{margin:0 0 20px;padding:12px 16px;background:#F5F8FD;border-radius:10px;font-size:13.5px;color:#334155}
+#usersView .lop-how summary{cursor:pointer;font-weight:700;color:var(--j-navy)}
+#usersView .lop-how summary:focus-visible{outline:2px solid var(--j-blue);outline-offset:3px;border-radius:4px}
+#usersView .lop-how ol{margin:10px 0 0;padding-left:1.4em;line-height:1.8}
+#usersView .lop-list{margin-top:22px;border-top:1px solid #F0F4FA}
+#usersView .lop-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #F0F4FA;min-width:0}
+#usersView .lop-row.lop-off .ur-id{opacity:.55}
+#usersView .lop-st{flex:0 0 auto;font-size:12px;font-weight:700;border-radius:6px;padding:3px 9px;background:#E7F6EC;color:#15803D}
+#usersView .lop-row.lop-off .lop-st{background:#EEF2F7;color:#5B6B8C}
+#usersView .lop-row .usr-btn{flex:0 0 auto}
+@media (max-width:640px){ #usersView .lop-row{flex-wrap:wrap} #usersView .lop-row .ur-id{flex-basis:calc(100% - 50px)} #usersView .lop-row .lop-st{margin-left:50px} }
 #usersView .usr-reset{margin:10px 0 0 50px}
 #usersView .usr-reset .usr-passrow{flex-wrap:wrap}
 #usersView .usr-reset input{flex:1 1 220px;height:36px;padding:0 12px;border:1px solid #D5DEEC;border-radius:8px;font:inherit;font-size:14px}
@@ -1853,6 +1866,30 @@ body{background:var(--j-bg)!important;color:var(--j-text);font-family:"Hiragino 
       <section class="us-card">
         <div class="us-step"><span>2</span><h3>登録済みのスタッフ</h3><span class="usr-count" id="usrCount"></span></div>
         <div id="usrList"><div class="placeholder">読み込み中…</div></div>
+      </section>
+      <section class="us-card" id="lopCard">
+        <div class="us-step"><span>3</span><h3>LINEで操作できる人</h3><span class="usr-count" id="lopCount"></span></div>
+        <p class="lop-lead">スタッフグループで「完了 番号」や「✅ 対応完了にする」ボタンを使える人です。ここに登録していない人が送っても、何も起きません。</p>
+        <details class="lop-how">
+          <summary>LINEの番号の調べ方</summary>
+          <ol>
+            <li>LINEで、本人と「JISSO AI」公式アカウントだけの新しいグループを作ります。</li>
+            <li>そのグループで「グループID」と送ります。</li>
+            <li>返事の「送った方のIDです」の下にある、U から始まる番号をコピーします（返事をまるごと貼っても大丈夫です）。</li>
+            <li>確かめ終わったら、そのグループは退会してかまいません。</li>
+          </ol>
+        </details>
+        <div class="us-two">
+          <div class="us-field"><i><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></i><div>
+            <label for="lopName">名前<em>必須</em></label>
+            <input id="lopName" type="text" placeholder="山田 花子" autocomplete="off" maxlength="40"></div></div>
+          <div class="us-field"><i><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6M9 11h6M9 15h3"/></svg></i><div>
+            <label for="lopId">LINEの番号<em>必須</em></label>
+            <input id="lopId" type="text" placeholder="U から始まる33文字" autocomplete="off" spellcheck="false"></div></div>
+        </div>
+        <div class="usr-msg" id="lopMsg" role="status"></div>
+        <button type="button" class="usr-addbtn" id="lopAddBtn">LINEで操作できる人に追加</button>
+        <div id="lopList" class="lop-list"><div class="placeholder">読み込み中…</div></div>
       </section>
     </div>
     <aside class="us-card us-side">
@@ -13332,7 +13369,114 @@ function usrFillStoreOptions(){
 }
 
 /* 一覧取得：sbRpc('list_staff',{p_tenant:TENANT_ID})（選択中テナント。platform_admin以外は自テナントに矯正） */
+/* ===== LINEで操作できる人（2026-10-29）=====
+   スタッフグループの「完了 番号」・完了ボタンを使える人（staff_line_operators）を、ここで登録・停止する。
+   ・読む：staff_line_operators（RLS＝自テナントのオーナー／管理者だけ読める）
+   ・書く：set_staff_line_operator（DB側でも自テナントのオーナー／管理者かを確かめる）。行は消さず、止める／再開する。
+   ・判定の正本は poc/admin_line_operator_pure.mjs。下の <lineop-pure> はその写しで、tests/admin_line_operator.test.mjs が一致を確かめる。 */
+var LOP_PURE=(function(){
+/*<lineop-pure>*/
+// LINEで操作できる人（スタッフグループの「完了」を使える人）の判定。ネット・画面に触れない。admin.html の <lineop-pure> はこの写し。
+// LINEの番号（ユーザーID）は U＋小文字の16進32文字。公式アカウントの返事をまるごと貼っても、番号が1つだけなら取り出す。
+function lineOpPickId(input) {
+ if (typeof input !== 'string') return '';
+ const found = input.match(/(?<![0-9a-zA-Z])U[0-9a-f]{32}(?![0-9a-zA-Z])/g) || [];
+ const uniq = found.filter((v, i) => found.indexOf(v) === i);
+ return uniq.length === 1 ? uniq[0] : '';
+}
+// 一覧に出すときは末尾6文字だけ見せる（画面をのぞかれても番号を丸ごと読ませない）。
+function lineOpMask(id) {
+ if (typeof id !== 'string' || !/^U[0-9a-f]{32}$/.test(id)) return '番号の形が正しくありません';
+ return 'U…' + id.slice(-6);
+}
+// 名前は前後の空白を取り、40文字までにする。空なら空のまま（必須かどうかは呼び出し側で決める）。
+function lineOpLabel(input) {
+ if (typeof input !== 'string') return '';
+ return input.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 40);
+}
+// 有効な人を先に、同じなら登録した順。元の配列は変えない。
+function lineOpSort(rows) {
+ if (!Array.isArray(rows)) return [];
+ return rows.filter((r) => r && typeof r === 'object').slice().sort((a, b) => {
+  if (!!a.is_active !== !!b.is_active) return a.is_active ? -1 : 1;
+  return String(a.created_at || '').localeCompare(String(b.created_at || ''));
+ });
+}
+// サーバーからのエラーを、画面に出す日本語へ。
+function lineOpErrorText(err) {
+ const m = String((err && err.message) || err || '');
+ if (/forbidden|permission denied|42501/i.test(m)) return 'オーナー／管理者だけが登録・変更できます。';
+ if (/bad_args/i.test(m)) return 'LINEの番号を確認してください。';
+ if (/mfa_required/i.test(m)) return '二段階認証が必要です。もう一度ログインしてください。';
+ if (/failed to fetch|network/i.test(m)) return '通信エラーで保存できませんでした。電波の良い場所でもう一度お試しください。';
+ return '保存できませんでした。画面を再読み込みして確認してください。';
+}
+/*</lineop-pure>*/
+return {lineOpPickId:lineOpPickId,lineOpMask:lineOpMask,lineOpLabel:lineOpLabel,lineOpSort:lineOpSort,lineOpErrorText:lineOpErrorText};
+})();
+var LOP_SEQ=0, LOP_BUSY=false;
+function lopMsg(t, ok){ var e=document.getElementById('lopMsg'); if(!e) return; e.textContent=t||''; e.style.color= ok===true ? '#15803D' : ok===false ? '#B91C1C' : '#475569'; }
+function loadLineOperators(){
+  var list=document.getElementById('lopList'); if(!list) return Promise.resolve();
+  var tenant=TENANT_ID, seq=++LOP_SEQ;
+  if(!tenant){ list.innerHTML='<div class="placeholder">店が選ばれていません。</div>'; return Promise.resolve(); }
+  return sbGet('staff_line_operators?select=line_user_id,label,is_active,created_at&tenant_id=eq.'+encodeURIComponent(tenant)+'&order=created_at.asc')
+    .then(function(rows){ if(tenant!==TENANT_ID||seq!==LOP_SEQ) return; renderLineOperators(rows||[]); })
+    .catch(function(err){ if(tenant!==TENANT_ID||seq!==LOP_SEQ) return; list.innerHTML='<div class="placeholder">取得できませんでした<br>'+esc(LOP_PURE.lineOpErrorText(err))+'</div>'; });
+}
+function renderLineOperators(rows){
+  var list=document.getElementById('lopList'), cnt=document.getElementById('lopCount'); if(!list) return;
+  var sorted=LOP_PURE.lineOpSort(rows), active=sorted.filter(function(r){return r.is_active;}).length;
+  if(cnt) cnt.textContent = active+'名';
+  if(!sorted.length){ list.innerHTML='<div class="placeholder">まだ誰も登録されていません。登録するまで、LINEからは誰も「完了」にできません。</div>'; return; }
+  list.innerHTML = sorted.map(function(r){
+    var name=LOP_PURE.lineOpLabel(r.label)||'（名前なし）', on=!!r.is_active;
+    return '<div class="lop-row'+(on?'':' lop-off')+'">'
+      + '<div class="ur-av" aria-hidden="true">'+esc(name.charAt(0))+'</div>'
+      + '<div class="ur-id"><b>'+esc(name)+'</b><span>'+esc(LOP_PURE.lineOpMask(r.line_user_id))+'</span></div>'
+      + '<span class="lop-st">'+(on?'使える':'停止中')+'</span>'
+      + '<button type="button" class="usr-btn'+(on?' usr-danger':'')+'" data-lop-act="'+(on?'off':'on')+'" data-lop-id="'+esc(r.line_user_id)+'" data-lop-name="'+esc(name)+'">'+(on?'止める':'再開する')+'</button>'
+      + '</div>';
+  }).join('');
+}
+function lopSave(id, label, active){
+  return sbRpc('set_staff_line_operator',{ p_tenant:TENANT_ID, p_line_user_id:id, p_label:label, p_active:active });
+}
+function lopAdd(){
+  if(LOP_BUSY) return;
+  var nameEl=document.getElementById('lopName'), idEl=document.getElementById('lopId'), btn=document.getElementById('lopAddBtn');
+  var label=LOP_PURE.lineOpLabel(nameEl?nameEl.value:''), id=LOP_PURE.lineOpPickId(idEl?idEl.value:'');
+  if(!label){ lopMsg('名前を入れてください。', false); if(nameEl) nameEl.focus(); return; }
+  if(!id){ lopMsg('LINEの番号が読み取れません。U から始まる33文字（英数字）を1つだけ入れてください。', false); if(idEl) idEl.focus(); return; }
+  var tenant=TENANT_ID; LOP_BUSY=true; if(btn) btn.disabled=true; lopMsg('登録中…');
+  lopSave(id, label, true).then(function(){
+    if(tenant!==TENANT_ID) return;
+    if(nameEl) nameEl.value=''; if(idEl) idEl.value='';
+    lopMsg(label+' さんを登録しました。スタッフグループで「完了 番号」が使えます。', true);
+    return loadLineOperators();
+  }).catch(function(err){ if(tenant===TENANT_ID) lopMsg(LOP_PURE.lineOpErrorText(err), false); })
+    .then(function(){ LOP_BUSY=false; if(btn) btn.disabled=false; });
+}
+function lopToggle(btn){
+  if(LOP_BUSY) return;
+  var id=btn.getAttribute('data-lop-id'), on=btn.getAttribute('data-lop-act')==='on', name=btn.getAttribute('data-lop-name')||'';
+  if(!LOP_PURE.lineOpPickId(id)) return;
+  var tenant=TENANT_ID; LOP_BUSY=true; btn.disabled=true; lopMsg(on?'再開しています…':'止めています…');
+  lopSave(id, '', on).then(function(){
+    if(tenant!==TENANT_ID) return;
+    lopMsg(on ? name+' さんを再開しました。' : name+' さんを止めました。LINEからの「完了」は無視されます。', true);
+    return loadLineOperators();
+  }).catch(function(err){ if(tenant===TENANT_ID) lopMsg(LOP_PURE.lineOpErrorText(err), false); })
+    .then(function(){ LOP_BUSY=false; btn.disabled=false; });
+}
+(function(){
+  var b=document.getElementById('lopAddBtn'); if(b) b.addEventListener('click', lopAdd);
+  var l=document.getElementById('lopList'); if(l) l.addEventListener('click', function(ev){ var t=ev.target.closest('[data-lop-act]'); if(t) lopToggle(t); });
+  var i=document.getElementById('lopId'); if(i) i.addEventListener('keydown', function(ev){ if(ev.key==='Enter') lopAdd(); });
+})();
+
 function loadStaff(){
+  loadLineOperators();
   var list=document.getElementById('usrList');if(!list)return Promise.resolve();
   var tenant=TENANT_ID,seq=++STAFF_ARTIST_LOAD_SEQ,linkFailed=false;
   STAFF_ARTIST_LINKS={};STAFF_ARTIST_OPTIONS=[];
