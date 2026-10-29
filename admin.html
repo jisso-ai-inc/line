@@ -1112,6 +1112,10 @@ body{background:var(--j-bg)!important;color:var(--j-text);font-family:"Hiragino 
 .jd-sess-pills .jd-pill{text-align:center}
 .jd-sess-list .pill-gray{color:#475569}
 .jd-sess-warn{background:#FEF3E2;color:#92400E;border-radius:10px;padding:10px 12px;font-size:12.5px;line-height:1.6;margin-bottom:10px}
+/* ダッシュボード上部の警告欄（全体管理者だけ：自動処理の点呼・LINE送信失敗）。平常時は空＝何も出ない */
+.jd-alerts{display:flex;flex-direction:column;gap:8px;margin:0 0 16px}
+.jd-alerts:empty{display:none}
+.jd-alert{background:#FEF3E2;border:1px solid #F5C77E;color:#92400E;border-radius:10px;padding:10px 14px;font-size:13px;line-height:1.6}
 .jd-sess-foot{font-size:12px;color:var(--j-muted);margin-top:10px;line-height:1.6}
 .jd-sess-edit{margin-top:12px;border-top:1px solid var(--j-line);padding-top:10px}
 .jd-sess-edit summary{cursor:pointer;font-size:13px;font-weight:800;color:var(--j-blue);padding:8px 0;border-radius:6px}
@@ -1125,6 +1129,16 @@ body{background:var(--j-bg)!important;color:var(--j-text);font-family:"Hiragino 
 @media (max-width:560px){ .jd-sess-edit summary{padding:12px 0} .jd-sess-form select,.jd-sess-form input,.jd-sess-form .jd-btn{min-height:44px;font-size:16px} .jd-sess-form .jd-btn{width:100%} }
 .jd-sess-msg{font-size:12.5px;line-height:1.5}
 .jd-sess-msg.ng{color:#B91C1C} .jd-sess-msg.ok{color:#15803D}
+/* 二段階認証のあと、管理画面を出す前のロゴ演出（約2.5秒・クリックで飛ばせる）。
+   ロゴの輪郭を細い線で描く→色が満ちる→光の帯が斜めに横切る→ふわっと消えて管理画面。動きは jIntroPlay()（Web Animations）。 */
+#jIntro{position:fixed;inset:0;z-index:200;display:none;align-items:center;justify-content:center;flex-direction:column;
+  background:var(--j-bg,#F4F7FC);cursor:pointer;overflow:hidden}
+#jIntro.is-on{display:flex}
+#jIntro .ji-stage{position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:12px 0}
+#jIntro .ji-logo{width:min(440px,78vw);height:auto;overflow:visible}
+#jIntro .ji-shine{position:absolute;top:0;bottom:0;left:0;width:40%;pointer-events:none;
+  background:linear-gradient(105deg,rgba(255,255,255,0),rgba(255,255,255,.9),rgba(255,255,255,0));transform:translateX(-150%)}
+#jIntro .ji-skip{position:absolute;bottom:28px;font-size:12px;color:#5B6B8C}
 /* ログイン */
 #login{background:var(--j-bg)!important}
 .jl{display:grid;grid-template-columns:1.05fr 1fr;width:100%;max-width:1040px;min-height:560px;background:#fff;border-radius:22px;overflow:hidden;box-shadow:0 20px 60px rgba(11,31,77,.18)}
@@ -1889,12 +1903,38 @@ body{background:var(--j-bg)!important;color:var(--j-text);font-family:"Hiragino 
           <input id="mfaCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="12" placeholder="123456">
         </div>
         <div id="mfaErr" role="status" style="color:#c2410c;font-size:12.5px;min-height:16px;margin-top:8px"></div>
-        <button type="button" class="jl-go" id="mfaGo">確認してログイン</button>
-        <button type="button" class="jl-mfa-out" id="mfaOut">やめてログアウト</button>
-        <div class="jl-note">スマホを無くした・機種変更した場合は、管理者（生野さん）に連絡してください。</div>
+        <button type="button" class="jl-go" id="mfaGo">ログイン</button>
+        <button type="button" class="jl-mfa-out" id="mfaOut">ログアウト</button>
       </div>
     </div>
   </div>
+</div>
+<div id="jIntro" role="status" aria-live="polite" aria-label="ログインしました。管理画面を開いています。">
+  <div class="ji-stage">
+    <svg class="ji-logo" viewBox="30 10 960 270" aria-hidden="true"><defs>
+      <linearGradient id="jiL" gradientUnits="userSpaceOnUse" x1="26" y1="400" x2="230" y2="20"><stop offset="0" stop-color="#123FC0"/><stop offset="0.52" stop-color="#086AE0"/><stop offset="1" stop-color="#38C8EB"/></linearGradient>
+      <linearGradient id="jiR" gradientUnits="userSpaceOnUse" x1="390" y1="400" x2="450" y2="126"><stop offset="0" stop-color="#0C9BDD"/><stop offset="1" stop-color="#087FE8"/></linearGradient>
+      <linearGradient id="jiC" gradientUnits="userSpaceOnUse" x1="286" y1="155" x2="304" y2="400"><stop offset="0" stop-color="#1438A6"/><stop offset="1" stop-color="#102D87"/></linearGradient>
+    </defs><g transform="translate(50 30) scale(.57)">
+      <path class="ji-p ji-p1" d="M0 400L219.393 20L268.393 126L188.719 264H226L88 400Z" fill="url(#jiL)"/>
+      <path class="ji-p ji-p2" d="M286 155L349 291.286L309 400L235.136 243.104Z" fill="url(#jiC)"/>
+      <path class="ji-p ji-p3" d="M382 126H476L416 400H328L361 291.286Z" fill="url(#jiR)"/>
+      <path class="ji-p ji-p4" d="M361 291.286L416 400H328Z" fill="#51BEE9"/>
+      <circle class="ji-p ji-dot" cx="450" cy="62" r="44" fill="#087FE8"/>
+    </g><g class="ji-word"><g transform="translate(428 64) scale(1.112)" fill="#0B1F4D" fill-rule="evenodd">
+      <path d="M64 0H84V55C84 77 71 88 45 88H33C12 88 1 78 0 60H20C21 67 25 70 34 70H44C58 70 64 65 64 53Z"/>
+      <path d="M0 0H20V88H0Z" transform="translate(108 0)"/>
+      <path d="M96 24H76C74 19 69 18 60 18H33C23 18 19 21 19 27C19 33 23 36 33 36H63C86 36 98 44 98 61C98 79 85 88 63 88H33C12 88 1 80 0 63H20C22 69 26 70 35 70H62C73 70 78 67 78 61C78 55 74 53 63 53H34C12 53 0 44 0 27C0 9 13 0 34 0H61C82 0 94 8 96 24Z" transform="translate(152 0)"/>
+      <path d="M96 24H76C74 19 69 18 60 18H33C23 18 19 21 19 27C19 33 23 36 33 36H63C86 36 98 44 98 61C98 79 85 88 63 88H33C12 88 1 80 0 63H20C22 69 26 70 35 70H62C73 70 78 67 78 61C78 55 74 53 63 53H34C12 53 0 44 0 27C0 9 13 0 34 0H61C82 0 94 8 96 24Z" transform="translate(274 0)"/>
+      <path d="M36 0H66C90 0 102 13 102 37V51C102 75 90 88 66 88H36C12 88 0 75 0 51V37C0 13 12 0 36 0ZM36 18C25 18 20 24 20 37V51C20 64 25 70 36 70H66C77 70 82 64 82 51V37C82 24 77 18 66 18Z" transform="translate(396 0)"/>
+    </g><g transform="translate(566.288 192) scale(.95)" fill="#0B1F4D">
+      <path d="M0 20H84V24H0ZM208 20H292V24H208Z"/>
+      <path d="M0 44L19 0H29L48 44H38L34 34H14L10 44ZM18 26H30L24 11Z" transform="translate(110 0)" fill-rule="evenodd"/>
+      <path d="M0 0H9V44H0Z" transform="translate(174 0)"/>
+    </g></g></svg>
+    <div class="ji-shine"></div>
+  </div>
+  <div class="ji-skip">クリック（タップ）でスキップ</div>
 </div>
 <script>
 // ===== 設定・認証・共有ヘルパー（全タブ共通。各タブはこれを再定義しない）=====
@@ -2547,8 +2587,8 @@ function chatUpdateModeNote(detail){
   if(chatCanWorkflow(detail) && detail.status!=='none'){
     var sendNote=detail.send_enabled===true ? '管理画面返信が有効です。' : '管理画面返信はまだ無効です。';
     note=detail.ai_resume_enabled===true
-      ? '「未確認」ボタンで確認済みにできます。会話を開くだけでは変わりません。対応開始・「対応完了（AI再開）」が有効です。'+sendNote
-      : '「未確認」ボタンで確認済みにできます。会話を開くだけでは変わりません。「対応を始める」が有効です。対応完了によるAI再開はまだ無効です。'+sendNote;
+      ? '「未確認」ボタンで確認済みにできます。会話を開くだけでは変わりません。「対応を始める」と「対応完了」が使えます。'+sendNote
+      : '「未確認」ボタンで確認済みにできます。会話を開くだけでは変わりません。「対応を始める」が使えます（「対応完了」はまだ使えません）。'+sendNote;
   }
   chatSetText('chatModeNote',note);
 }
@@ -3423,7 +3463,7 @@ function handlingRender(host,detail){
  open.appendChild(chatElement('span','handling-open-name',data.label?data.label.name+(data.label.is_active===false?'（無効）':''):'ステータスなし'));
  open.appendChild(chatElement('span','','›'));host.appendChild(open);
  open.addEventListener('click',function(){handlingOpenPicker(detail,host,open);});
- if(data.ai_paused===true || data.ai_paused===undefined&&(detail.status==='in_progress'||detail.status==='needs_reply'))host.appendChild(chatElement('span','handling-note','AI停止中'));
+ // JISSO AI：AIの自動返信を使わないため「AI停止中」の札は出さない（常に人が返信する）。
  if(data.source==='staff')host.appendChild(chatElement('span','handling-note','手動設定'));
  var notice=chatElement('span','handling-note',detail.handlingNotice||'');notice.dataset.handlingNotice='';notice.setAttribute('aria-live','polite');host.appendChild(notice);
  if(CHAT_STATE&&CHAT_STATE.labelBusy)host.querySelectorAll('button,select').forEach(function(el){el.disabled=true;});
@@ -3588,6 +3628,7 @@ function loadHome(){
   body.innerHTML=''
     +'<div class="jd-head"><div><h2>ダッシュボード</h2><p>友だちの動きと、問い合わせ・申込の状況を一目で確認できます。</p></div>'
     +'<label class="jd-range">'+JD_IC.cal+'<select id="jdMonth"></select></label></div>'
+    +'<div id="homeAlerts" class="jd-alerts" role="status" aria-live="polite"></div>'
     +'<div class="jd-grid"><div>'
     +  '<div class="jd-kpis">'
     +    jdKpi('jdK1','友だち数','ic-blue',JD_IC.users,"gotoSubtab('resv','showCustomers')")
@@ -3659,6 +3700,9 @@ function loadHome(){
     jdSetKpi('jdK4', a1, '前月 '+a0+'件', jdChip(a1,a0));
     jdSteps(); jdInqTable(); jdActivity();
   }).catch(function(){ jdSetKpi('jdK4','—','',''); jdSetHtml('jdSteps','<div class="jd-empty">読み込めませんでした</div>'); });
+  // 全体管理者向けの警告（自動処理の点呼・LINE送信失敗）。上で画面を描き直すと消えるので、毎回取り直す。
+  //   ログイン直後は役割がまだ決まっていないため、役割が決まった時点（initResvStoreBar）でも呼び直している。
+  if(typeof loadHomeJobHealth==='function') loadHomeJobHealth();
 }
 var JD={ month:'', range:30, customers:null, inquiries:null, steps:null };
 var JD_IC={
@@ -4355,12 +4399,11 @@ function jobHealthMessage(summary){
 function showHomeJobHealthLine(msg){
   var old=document.getElementById('home-job-health'); if(old) old.remove();
   if(!msg) return;
-  var host=document.getElementById('home-attn');
-  var card=host ? (host.closest('.home-metric')||host.parentElement) : null;
-  if(!card || !card.parentElement) return;
-  var el=document.createElement('div'); el.id='home-job-health'; el.className='help-hint';
+  var box=document.getElementById('homeAlerts');   /* ダッシュボード上部の警告欄（loadHome が作る） */
+  if(!box) return;
+  var el=document.createElement('div'); el.id='home-job-health'; el.className='jd-alert';
   el.textContent=msg;   /* 文字は textContent で入れる＝HTMLを組み立てない */
-  card.parentElement.insertAdjacentElement('afterend', el);
+  box.appendChild(el);
 }
 function loadHomeJobHealth(){
   if(!window.IS_PLATFORM_ADMIN || typeof sbRpc!=='function') return;
@@ -4402,12 +4445,11 @@ function sendFailureMessage(row){
 function showHomeSendFailureLine(msg){
   var old=document.getElementById('home-send-fail'); if(old) old.remove();
   if(!msg) return;
-  var host=document.getElementById('home-attn');
-  var card=host ? (host.closest('.home-metric')||host.parentElement) : null;
-  if(!card || !card.parentElement) return;
-  var el=document.createElement('div'); el.id='home-send-fail'; el.className='help-hint';
+  var box=document.getElementById('homeAlerts');   /* ダッシュボード上部の警告欄（loadHome が作る） */
+  if(!box) return;
+  var el=document.createElement('div'); el.id='home-send-fail'; el.className='jd-alert';
   el.textContent=msg;   /* 文字は textContent で入れる＝HTMLを組み立てない */
-  card.parentElement.insertAdjacentElement('afterend', el);
+  box.appendChild(el);
 }
 function loadHomeSendFailures(){
   if(!window.IS_PLATFORM_ADMIN || typeof sbRpc!=='function') return;
@@ -5199,10 +5241,62 @@ function mfaAuthFetch(method, path, body){
     return res.text().then(function(t){ var j=null; try{ j=t?JSON.parse(t):null; }catch(e){} return { ok:res.ok, status:res.status, body:j }; });
   });
 }
-function mfaEnter(){
+// intro=true：二段階認証のコードが通った直後だけ、ロゴ演出を重ねてから管理画面を見せる。
+// 演出の裏で管理画面の読み込みを先に始めるので、待ち時間は増えない。再読み込み時の自動ログインでは出さない。
+function mfaEnter(intro){
   mfaReset();
+  if(intro) jIntroPlay();
   var lg=mfaEl('login'); if(lg) lg.style.display='none';
   resolveTenantsThenEnter();
+}
+var JINTRO={ timer:0, outTimer:0, anims:[] };
+function jIntroAnim(el, kf, opt){ var a=el.animate(kf, Object.assign({ fill:'both' }, opt)); JINTRO.anims.push(a); return a; }
+function jIntroClear(){
+  JINTRO.anims.forEach(function(a){ try{ a.cancel(); }catch(e){} }); JINTRO.anims=[];
+  var el=document.getElementById('jIntro'); if(!el) return;
+  el.querySelectorAll('.ji-logo path,.ji-logo circle').forEach(function(e){
+    e.style.stroke=''; e.style.strokeWidth=''; e.style.vectorEffect=''; e.style.strokeDasharray='';
+  });
+}
+function jIntroPlay(){
+  var el=document.getElementById('jIntro'); if(!el) return;
+  clearTimeout(JINTRO.timer); clearTimeout(JINTRO.outTimer); jIntroClear();
+  el.classList.add('is-on');
+  var svg=el.querySelector('.ji-logo'), shine=el.querySelector('.ji-shine');
+  var reduce=window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var total;
+  if(reduce || typeof el.animate!=='function' || !svg){
+    // 動きを減らす設定の人：線描きと光は省き、ロゴを静かに出すだけ。
+    if(svg && typeof svg.animate==='function') jIntroAnim(svg, { opacity:[0,1] }, { duration:300, easing:'ease' });
+    total=900;
+  } else {
+    // ① 輪郭を細い線で描く → 色が満ちて線が消える
+    var parts=[].slice.call(svg.querySelectorAll('path,circle'));
+    var EM='cubic-bezier(.65,0,.35,1)';
+    parts.forEach(function(e, j){
+      var n=e.getTotalLength ? e.getTotalLength() : 0; if(!n) return;
+      e.style.stroke='#086AE0'; e.style.strokeWidth='1.2'; e.style.vectorEffect='non-scaling-stroke'; e.style.strokeDasharray=String(n);
+      jIntroAnim(e, { strokeDashoffset:[n,0] }, { duration:900, delay:j*40, easing:EM });
+      jIntroAnim(e, { fillOpacity:[0,1], strokeOpacity:[1,0] }, { duration:420, delay:1000+j*20, easing:'ease' });
+    });
+    // ② 色が満ちたら、光の帯が斜めに横切る
+    if(shine) jIntroAnim(shine, { transform:['translateX(-150%)','translateX(300%)'] }, { duration:850, delay:1550, easing:EM });
+    total=2450;
+  }
+  JINTRO.timer=setTimeout(jIntroEnd, total);
+  el.onclick=jIntroEnd;
+  document.addEventListener('keydown', jIntroKey);
+}
+function jIntroKey(ev){ if(ev.key==='Escape'||ev.key==='Enter'||ev.key===' ') jIntroEnd(); }
+function jIntroEnd(){
+  var el=document.getElementById('jIntro'); if(!el || !el.classList.contains('is-on') || JINTRO.outTimer) return;
+  clearTimeout(JINTRO.timer);
+  document.removeEventListener('keydown', jIntroKey);
+  el.onclick=null;
+  var fade= typeof el.animate==='function' ? el.animate({ opacity:[1,0] }, { duration:400, easing:'cubic-bezier(.7,0,.84,0)', fill:'forwards' }) : null;
+  JINTRO.outTimer=setTimeout(function(){
+    el.classList.remove('is-on'); if(fade) fade.cancel(); jIntroClear(); JINTRO.outTimer=0;
+  }, 420);
 }
 // ログイン・自動ログインの直後に呼ぶ。aal2 ならそのまま入口、そうでなければ二段階認証へ。
 function mfaAfterAuth(){
@@ -5241,9 +5335,9 @@ function mfaRetryable(msg){
 function mfaShowChallenge(factorId){
   MFA.factorId=factorId; MFA.step='verify';
   mfaText('mfaTitle','二段階認証');
-  mfaText('mfaLead','スマホの認証アプリに表示されている6桁のコードを入力してください。');
+  mfaText('mfaLead','認証アプリの6桁を入力してください。');
   mfaShow('mfaEnroll', false); mfaShow('mfaForm', true);
-  var g=mfaEl('mfaGo'); if(g) g.textContent='確認してログイン';
+  var g=mfaEl('mfaGo'); if(g) g.textContent='ログイン';
   mfaMsg(''); mfaSetBusy(false);
   var c=mfaEl('mfaCode'); if(c){ c.value=''; c.focus(); }
 }
@@ -5288,11 +5382,11 @@ function mfaVerify(){
     MFA.challengeId=r.body.id;
     return mfaAuthFetch('POST','factors/'+fid+'/verify',{ challenge_id:r.body.id, code:code });
   }).then(function(r){
-    if(!MFA.active) return; // 途中で「やめてログアウト」された
+    if(!MFA.active) return; // 途中で「ログアウト」された
     if(r.ok && r.body && r.body.access_token){
       TOKEN=r.body.access_token;
       saveSession(r.body);
-      mfaEnter();
+      mfaEnter(true);
       return;
     }
     MFA.challengeId=''; mfaSetBusy(false);
@@ -5307,7 +5401,7 @@ function mfaVerify(){
     mfaMsg('通信エラーで確認できませんでした。電波の良い場所でもう一度お試しください。', true);
   });
 }
-// 「やめてログアウト」：サーバー側のログアウトも投げて（失敗しても続行）、最初の画面へ。
+// 「ログアウト」：サーバー側のログアウトも投げて（失敗しても続行）、最初の画面へ。
 function mfaCancel(){
   if(TOKEN){ fetch(SB_URL+'/auth/v1/logout',{ method:'POST', headers:Object.assign({'Content-Type':'application/json'}, hdr()) }).catch(function(){}); }
   TOKEN=''; try{ clearSession(); }catch(e){}
@@ -8326,7 +8420,7 @@ function crmEditMsg(t, ok){
 /* 有人対応RPCのエラーコード → 日本語。値はそのまま画面に出さない（コードだけを見る）。 */
 function crmHumanRpcError(err){
   var msg = String(err && err.message || err || '');
-  if (/legacy_completion_disabled/.test(msg)) return 'この店舗はAI再開をチャットに移行済みです。チャットの「対応完了（AI再開）」から行ってください。';
+  if (/legacy_completion_disabled/.test(msg)) return 'この店舗では、対応完了はチャットから行います。チャットの「対応完了」ボタンを押してください。';
   if (/unresolved_delivery/.test(msg)) return 'チャットに送信中・失敗の返信が残っています。チャットで確認してから対応完了にしてください。';
   if (/conversation_not_open/.test(msg)) return 'このお客様は今「要対応」ではないため、対応完了にできません（画面を再読込してください）。';
   if (/line_not_linked/.test(msg)) return 'LINE未連携のお客様は有人対応に切り替えられません（AIは元々返信しません）。';
@@ -8365,10 +8459,10 @@ async function crmSaveEdits(uid){
     if (humanSel === HUMAN_STATUS_ATT) {
       humanRpc = function(){ return sbRpc('line_crm_karte_start_handling', { p_tenant: TENANT_ID, p_customer: cust.id, p_reason: reasonVal || null }); };
     } else if (humanSel === HUMAN_STATUS_DONE && expectedHuman === HUMAN_STATUS_ATT) {
-      if (!(await askConfirm({title:'', body:'対応完了にすると、次のお客様メッセージからAIの自動返信が再開します。対応完了にしますか？', ok:'対応完了にする', cancel:'やめる', danger:false}))) return;
+      if (!(await askConfirm({title:'', body:'対応完了にすると「要対応」から外れます。お客様から次のメッセージが届くと、また「要対応」に戻ります。対応完了にしますか？', ok:'対応完了にする', cancel:'やめる', danger:false}))) return;
       humanRpc = function(){ return sbRpc('line_crm_karte_complete_handling', { p_tenant: TENANT_ID, p_customer: cust.id }); };
     } else {
-      crmEditMsg('「対応不要」には戻せません。AIを再開するときは「対応完了」を選んでください。');
+      crmEditMsg('「対応不要」には戻せません。対応が終わったら「対応完了」を選んでください。');
       return;
     }
   }
@@ -8409,7 +8503,7 @@ async function crmSaveEdits(uid){
       if (humanRpc){ delete CRM_CARDS[uid]; selectCustomer(uid); crmLoadList(); }
       return;
     }
-    crmEditMsg(humanRpc ? (humanSel === HUMAN_STATUS_ATT ? '✅ 有人対応にしました。AIの自動返信は止まっています。' : '✅ 対応完了にしました。AIの自動返信が再開します。') : '✅ 更新しました。', true);
+    crmEditMsg(humanRpc ? (humanSel === HUMAN_STATUS_ATT ? '✅ 要対応にしました。' : '✅ 対応完了にしました。') : '✅ 更新しました。', true);
     delete CRM_CARDS[uid];          // キャッシュ破棄
     selectCustomer(uid);            // カルテ再読込
     crmLoadList();                  // 一覧のステータス・区分も更新
